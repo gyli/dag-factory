@@ -109,6 +109,8 @@ pip-selfcheck.json
 # Claude Code
 .claude/settings.local.json
 .claude/plans/
+# taskq: local queue state, run reports and worktrees
+.claude/queue/state/
 CLAUDE.local.md
 
 # Cursor

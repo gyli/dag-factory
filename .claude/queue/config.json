@@ -1,0 +1,24 @@
+{
+  "scoring": {
+    "age_rate": 0.15,
+    "age_cap": 3.0,
+    "due_max": 4.0,
+    "due_horizon_days": 14,
+    "min_effort": 0.25,
+    "retry_penalty": 0.6,
+    "risk_factor": { "low": 1.0, "medium": 0.9, "high": 0.75 }
+  },
+  "run": {
+    "max_tasks": 6,
+    "task_timeout_min": 45,
+    "stop_after_min": 300,
+    "branch_prefix": "claude/auto/",
+    "default_verify": ["python3 -m pytest tests/ -x -q"]
+  },
+  "harvest": {
+    "scanners": ["todo", "skipped_test", "type_ignore"],
+    "paths": ["."],
+    "exclude": ["\\.claude/", "^dev/include/", "\\.lock$", "^CHANGELOG\\.md$"],
+    "max_new": 20
+  }
+}
