@@ -378,6 +378,27 @@ def test_adjust_general_task_params_external_sensor_arguments():
     assert task_params["execution_delta"] == datetime.timedelta(days=1)
 
 
+def test_build_accepts_int_seconds_for_timedelta_params():
+    dag_config = {
+        "default_args": {"owner": "o", "start_date": "2024-01-01", "retry_delay": 300},
+        "schedule": "0 3 * * *",
+        "dagrun_timeout": 3600,
+        "tasks": [
+            {
+                "task_id": "task_1",
+                "operator": get_bash_operator_path(),
+                "bash_command": "echo 1",
+                "execution_timeout": 120,
+            }
+        ],
+    }
+    dag = dagbuilder.DagBuilder("test_dag", dag_config, {}).build()["dag"]
+
+    assert dag.dagrun_timeout == timedelta(seconds=3600)
+    assert dag.task_dict["task_1"].execution_timeout == timedelta(seconds=120)
+    assert dag.task_dict["task_1"].retry_delay == timedelta(seconds=300)
+
+
 def test_make_task_valid():
     td = dagbuilder.DagBuilder("test_dag", DAG_CONFIG, DEFAULT_CONFIG)
     operator = get_bash_operator_path()
