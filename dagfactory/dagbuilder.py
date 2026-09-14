@@ -1044,7 +1044,27 @@ class DagBuilder:
     @staticmethod
     def adjust_general_task_params(task_params: dict[str, Any]):
         """Adjusts in place the task params argument"""
-        # Used by airflow.sensors.external_task_sensor.ExternalTaskSensor
+        # Used by airflow.sensors.external_task_sensor.ExternalTaskSensor.
+        # These three are mutually exclusive; without this check the chain
+        # below silently ignores whichever the user listed second.
+        execution_date_options = [
+            name
+            for name, present in (
+                ("execution_date_fn", utils.check_dict_key(task_params, "execution_date_fn")),
+                ("execution_delta", utils.check_dict_key(task_params, "execution_delta")),
+                (
+                    "execution_date_fn_name/execution_date_fn_file",
+                    utils.check_dict_key(task_params, "execution_date_fn_name")
+                    or utils.check_dict_key(task_params, "execution_date_fn_file"),
+                ),
+            )
+            if present
+        ]
+        if len(execution_date_options) > 1:
+            raise DagFactoryConfigException(
+                f"Only one of {', '.join(execution_date_options)} may be set, got {len(execution_date_options)}."
+            )
+
         if utils.check_dict_key(task_params, "execution_date_fn"):
             python_callable: Callable = import_string(task_params["execution_date_fn"])
             task_params["execution_date_fn"] = python_callable
