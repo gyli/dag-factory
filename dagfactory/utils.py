@@ -243,10 +243,9 @@ def is_partial_duplicated(partial_kwargs: Dict[str, Any], task_params: Dict[str,
     :type: bool
     """
 
-    for key in partial_kwargs:
-        task_duplicated_kwarg = task_params.get(key, None)
-    if task_duplicated_kwarg is not None:
-        raise DagFactoryException("Duplicated partial kwarg! It's already in task_params.")
+    duplicated_kwargs = sorted(set(partial_kwargs) & set(task_params))
+    if duplicated_kwargs:
+        raise DagFactoryException(f"Duplicated partial kwarg(s) {duplicated_kwargs}! Already in task_params.")
     return False
 
 

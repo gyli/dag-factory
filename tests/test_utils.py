@@ -6,6 +6,7 @@ import pendulum
 import pytest
 
 from dagfactory import utils
+from dagfactory.exceptions import DagFactoryException
 from dagfactory.utils import cast_with_type
 
 CET = pendulum.timezone("Europe/Amsterdam")
@@ -242,10 +243,28 @@ def test_is_partial_duplicated():
 
     partial_kwargs = {"key_1": "value1", "key_3": "value3"}
     task_params = {"key_3": "value3", "key_4": "value4"}
-    try:
+    with pytest.raises(DagFactoryException, match=r"Duplicated partial kwarg\(s\) \['key_3'\]"):
         utils.is_partial_duplicated(partial_kwargs, task_params)
-    except Exception as e:
-        assert str(e) == "Duplicated partial kwarg! It's already in task_params."
+
+
+def test_is_partial_duplicated_on_first_key():
+    # The duplicate is not the last key of partial_kwargs, which used to be
+    # the only position that was checked.
+    partial_kwargs = {"key_1": "value1", "key_2": "value2"}
+    task_params = {"key_1": "value1", "key_9": "value9"}
+    with pytest.raises(DagFactoryException, match=r"Duplicated partial kwarg\(s\) \['key_1'\]"):
+        utils.is_partial_duplicated(partial_kwargs, task_params)
+
+
+def test_is_partial_duplicated_reports_every_duplicate():
+    partial_kwargs = {"key_1": "value1", "key_2": "value2"}
+    task_params = {"key_1": "value1", "key_2": "value2"}
+    with pytest.raises(DagFactoryException, match=r"Duplicated partial kwarg\(s\) \['key_1', 'key_2'\]"):
+        utils.is_partial_duplicated(partial_kwargs, task_params)
+
+
+def test_is_partial_duplicated_empty_partial_kwargs():
+    assert utils.is_partial_duplicated({}, {"key_1": "value1"}) == False
 
 
 def test_open_and_filter_yaml_config_datasets():
