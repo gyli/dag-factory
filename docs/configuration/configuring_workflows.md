@@ -39,6 +39,20 @@ The **dictionary format** is also supported for backward compatibility. In this 
 !!! note "Format Recommendation"
     While both formats are supported, **we recommend using the list format** as it is more readable and easier to maintain.
 
+## The `dagfactory` Tag
+
+Every generated DAG gets a `dagfactory` tag so you can tell DAG Factory DAGs apart in the Airflow UI. Set `add_dagfactory_tag: false` on a DAG to leave it off:
+
+```yaml
+example_dag:
+  add_dagfactory_tag: false
+  tags:
+    - team-a
+  ...
+```
+
+Note that DAG Factory's usage telemetry keys off the same tag, so a DAG without it is also excluded from telemetry.
+
 ## Reserved Keys
 
 The DAG Factory designates certain YAML keys for internal processing. While these keys appear in your YAML files, they are reserved exclusively for specific internal functions and should not be redefined or used for other purposes:
