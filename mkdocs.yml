@@ -70,7 +70,9 @@ nav:
       - features/object_storage.md
       - Kubernetes Pod Operator: features/kpo.md
       - features/asset.md
+      - features/taskflow_pipeline.md
 
+  - Migration Guide: migration_guide.md
   - Comparison:
       - comparison/index.md
       - Traditional Airflow Operators: comparison/traditional_operators.md
