@@ -521,6 +521,7 @@ def load_yaml_dags(
     config_dict: Optional[dict] = None,
     defaults_config_dict: Optional[dict] = None,
     suffix=None,
+    recursive: bool = True,
 ):
     """
     Loads YAML or YML files in a specified folder (or from a specific YAML file or dictionary)
@@ -536,6 +537,7 @@ def load_yaml_dags(
     :param config_dict: The DAG dictionary.
     :param defaults_config_dict: The dictionary that hold default value.
     :param suffix: file suffix to filter `in` what files to scan for dags
+    :param recursive: whether to scan sub directories of `dags_folder`, defaults to True
     """
     logging.info("Loading DAGs from %s", dags_folder)
     if suffix is None:
@@ -564,6 +566,9 @@ def load_yaml_dags(
             for file_name in files:
                 if any(file_name.endswith(suf) for suf in suffix):
                     candidate_dag_files.append(root_path / file_name)
+            # os.walk is top down, so the first item is dags_folder itself.
+            if not recursive:
+                break
 
         first_strict_error = None
 

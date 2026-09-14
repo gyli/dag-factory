@@ -576,6 +576,27 @@ def test_load_yaml_dags_folder_scan_forwards_defaults_config_path(tmp_path):
     assert globals_dict["example_dag"].tasks[0].depends_on_past == True
 
 
+@pytest.mark.parametrize("recursive,nested_is_loaded", [(True, True), (False, False)])
+def test_load_yaml_dags_recursive_option(tmp_path, recursive, nested_is_loaded):
+    dags_folder = tmp_path / "dags"
+    nested = dags_folder / "nested"
+    nested.mkdir(parents=True)
+
+    shutil.copyfile(DAG_FACTORY_VARIABLES_AS_ARGUMENTS, dags_folder / "dag.yml")
+
+    with open(DAG_FACTORY_VARIABLES_AS_ARGUMENTS) as fp:
+        nested_config = {f"nested_{name}": config for name, config in yaml.safe_load(fp).items()}
+    with open(nested / "nested.yml", "w") as fp:
+        yaml.dump(nested_config, fp)
+
+    globals_dict = {}
+    load_yaml_dags(globals_dict=globals_dict, dags_folder=str(dags_folder), recursive=recursive)
+
+    loaded = {key for key, value in globals_dict.items() if hasattr(value, "dag_id")}
+    assert "example_dag" in loaded
+    assert ("nested_example_dag" in loaded) is nested_is_loaded
+
+
 def test_load_yaml_dags_config_dict_forwards_defaults_config_path():
     globals_dict = {}
 
