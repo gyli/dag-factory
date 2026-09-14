@@ -515,7 +515,7 @@ def _should_ignore_path(path: Path, dags_folder: Path, ignore_patterns_by_dir: D
 
 def load_yaml_dags(
     globals_dict: Dict[str, Any],
-    dags_folder: str = airflow_conf.get("core", "dags_folder"),
+    dags_folder: Union[str, List[str]] = airflow_conf.get("core", "dags_folder"),
     config_filepath: Optional[str] = None,
     defaults_config_path: str = airflow_conf.get("core", "dags_folder"),
     config_dict: Optional[dict] = None,
@@ -530,7 +530,7 @@ def load_yaml_dags(
     interesting to load only a subset by setting a different suffix.
 
     :param globals_dict: The globals() from the file used to generate DAGs
-    :param dags_folder: Path to the folder you want to get recursively scanned
+    :param dags_folder: Path, or list of paths, to the folder(s) you want to get recursively scanned
     :param config_filepath: A YAML path for DAG config.
     :param defaults_config_path: The Folder path where defaults.yml exist.
     :param config_dict: The DAG dictionary.
@@ -557,17 +557,22 @@ def load_yaml_dags(
         )
         factory._generate_dags(globals_dict)
     else:
-        dags_folder_path = Path(dags_folder)
-        ignore_patterns = _load_airflowignore(dags_folder)
+        dags_folders = [dags_folder] if isinstance(dags_folder, (str, Path)) else list(dags_folder)
 
-        for root_path, _dirs, files in _iter_dags_folder_contents(dags_folder_path):
-            for file_name in files:
-                if any(file_name.endswith(suf) for suf in suffix):
-                    candidate_dag_files.append(root_path / file_name)
+        # Each folder resolves its own .airflowignore, so keep every candidate
+        # paired with the folder it was found under.
+        for folder in dags_folders:
+            dags_folder_path = Path(folder)
+            ignore_patterns = _load_airflowignore(folder)
+
+            for root_path, _dirs, files in _iter_dags_folder_contents(dags_folder_path):
+                for file_name in files:
+                    if any(file_name.endswith(suf) for suf in suffix):
+                        candidate_dag_files.append((root_path / file_name, dags_folder_path, ignore_patterns))
 
         first_strict_error = None
 
-        for config_file_path in candidate_dag_files:
+        for config_file_path, dags_folder_path, ignore_patterns in candidate_dag_files:
             if _should_ignore_file(config_file_path, dags_folder_path, ignore_patterns):
                 logging.debug("Ignoring file %s (matched ignore pattern)", config_file_path)
                 continue
