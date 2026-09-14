@@ -10,7 +10,7 @@ import sys
 import types
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Any, AnyStr, Dict, List, Match, Optional, Pattern, Tuple, Union
+from typing import Any, Dict, List, Pattern, Tuple, Union
 
 import pendulum
 import yaml
@@ -53,33 +53,40 @@ def get_datetime(date_value: Union[str, datetime, date], timezone: str = "UTC") 
         return now - rel_delta
 
 
+# Matches a single "<number> <unit>" pair, e.g. "1 day" or "30 minutes".
+# Applied repeatedly by get_time_delta so units may appear in any order.
+RELATIVE_TIME_PATTERN: Pattern = re.compile(
+    r"(?P<value>\d+)\s+(?P<unit>day|hour|minute|second)s?",
+    flags=re.IGNORECASE,
+)
+
+
 def get_time_delta(time_string: str) -> timedelta:
     """
-    Takes a time string (1 hours, 10 days, etc.) and returns
-    a python timedelta object
+    Takes a time string (1 hour, 10 days, 2 hours 30 minutes, etc.) and returns
+    a python timedelta object.
+
+    Units may appear in any order and may be singular or plural. The whole
+    string must be consumed: anything that is not a recognised
+    "<number> <unit>" pair raises, rather than being silently dropped.
 
     :param time_string: the time value to convert to a timedelta
     :type time_string: str
     :returns: datetime.timedelta for relative time
     :type datetime.timedelta
     """
-    # pylint: disable=line-too-long
-    rel_time: Pattern = re.compile(
-        pattern=r"((?P<hours>\d+?)\s+hour)?((?P<minutes>\d+?)\s+minute)?((?P<seconds>\d+?)\s+second)?((?P<days>\d+?)\s+day)?",
-        # noqa
-        flags=re.IGNORECASE,
-    )
-    parts: Optional[Match[AnyStr]] = rel_time.match(string=time_string)
-    if not parts:
+    time_params: Dict[str, int] = {}
+    cursor: int = 0
+    for part in RELATIVE_TIME_PATTERN.finditer(time_string):
+        # Anything between the end of the previous unit and this one is junk.
+        if time_string[cursor : part.start()].strip():
+            raise DagFactoryException(f"Invalid relative time: {time_string}")
+        # timedelta takes plural keywords: day -> days, hour -> hours, ...
+        unit: str = f"{part.group('unit').lower()}s"
+        time_params[unit] = time_params.get(unit, 0) + int(part.group("value"))
+        cursor = part.end()
+    if not time_params or time_string[cursor:].strip():
         raise DagFactoryException(f"Invalid relative time: {time_string}")
-    # https://docs.python.org/3/library/re.html#re.Match.groupdict
-    parts: Dict[str, str] = parts.groupdict()
-    time_params = {}
-    if all(value is None for value in parts.values()):
-        raise DagFactoryException(f"Invalid relative time: {time_string}")
-    for time_unit, magnitude in parts.items():
-        if magnitude:
-            time_params[time_unit]: int = int(magnitude)
     return timedelta(**time_params)
 
 
