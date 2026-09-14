@@ -196,7 +196,12 @@ def convert(
 
     for file in files:
         try:
-            original_data = load_yaml_file(file)
+            # Read the file as plain YAML. load_yaml_file would expand env
+            # vars, build real Python objects out of __type__ blocks and
+            # collapse __and__/__or__/__join__, none of which can be written
+            # back out as the config the user wrote.
+            with open(file, "r", encoding="utf-8") as fp:
+                original_data = yaml.safe_load(fp)
             # we need to create a copy because the `update_yaml_structure` modifies the content by reference
             converted_data = update_yaml_structure(deepcopy(original_data))
 

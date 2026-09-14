@@ -1,3 +1,4 @@
+import datetime
 import shutil
 from filecmp import cmp
 from pathlib import Path
@@ -9,6 +10,7 @@ from typer.testing import CliRunner
 
 from dagfactory import __version__
 from dagfactory.__main__ import app
+from dagfactory._yaml import load_yaml_file
 
 EXAMPLE_YAML_AF2_DAGS = Path(__file__).parent.parent / "dev/dags/airflow2"
 EXAMPLE_YAML_AF3_DAGS = Path(__file__).parent.parent / "dev/dags/airflow3"
@@ -204,6 +206,39 @@ def test_convert_override_writes_file(tmpdir):
         converted_data["example_params"]["tasks"][0]["operator"]
         == "airflow.providers.standard.operators.bash.BashOperator"
     )
+
+
+def test_convert_override_preserves_env_vars_and_type_blocks(tmpdir):
+    source = tmpdir / "example.yml"
+    source.write_text(
+        "example_dag:\n"
+        "  schedule_interval: \"@daily\"\n"
+        "  tasks:\n"
+        "    t1:\n"
+        "      operator: airflow.operators.bash.BashOperator\n"
+        "      bash_command: \"echo $HOME\"\n"
+        "      retry_delay:\n"
+        "        __type__: datetime.timedelta\n"
+        "        seconds: 300\n",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["convert", str(source), "--override"])
+    assert result.exit_code == 0
+
+    written = source.read_text(encoding="utf-8")
+    # The conversion itself still happens.
+    assert "schedule: '@daily'" in written
+    assert "airflow.providers.standard.operators.bash.BashOperator" in written
+    # But the env var stays a template and the __type__ block stays a mapping,
+    # rather than being resolved and dumped as a python object tag.
+    assert "$HOME" in written
+    assert "__type__: datetime.timedelta" in written
+    assert "!!python/object" not in written
+
+    # And dag-factory can still read back what convert wrote.
+    reloaded = load_yaml_file(str(source))
+    assert reloaded["example_dag"]["tasks"]["t1"]["retry_delay"] == datetime.timedelta(seconds=300)
 
 
 def test_convert_no_changes(tmpdir):
