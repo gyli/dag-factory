@@ -948,7 +948,9 @@ class DagBuilder:
                 dag.doc_md += f"\n{subtitle}\n```yaml\n{self._yml_dag}\n```"
 
         tags = dag_params.get("tags", [])
-        if "dagfactory" not in tags:
+        # The dagfactory tag is added by default. Opting out also opts the DAG
+        # out of DAG Factory telemetry, which keys off the same tag.
+        if dag_params.get("add_dagfactory_tag", True) and "dagfactory" not in tags:
             tags.append("dagfactory")
         dag.tags = tags
 

@@ -378,6 +378,28 @@ def test_adjust_general_task_params_external_sensor_arguments():
     assert task_params["execution_delta"] == datetime.timedelta(days=1)
 
 
+@pytest.mark.parametrize(
+    "tags_config,expected_tags",
+    [
+        ({}, ["dagfactory"]),
+        ({"add_dagfactory_tag": True}, ["dagfactory"]),
+        ({"add_dagfactory_tag": False}, []),
+        ({"tags": ["team-a"]}, ["team-a", "dagfactory"]),
+        ({"tags": ["team-a"], "add_dagfactory_tag": False}, ["team-a"]),
+    ],
+)
+def test_build_add_dagfactory_tag(tags_config, expected_tags):
+    dag_config = {
+        "default_args": {"owner": "custom_owner", "start_date": "2024-01-01"},
+        "schedule": "0 3 * * *",
+        "tasks": [{"task_id": "task_1", "operator": get_bash_operator_path(), "bash_command": "echo 1"}],
+        **tags_config,
+    }
+    td = dagbuilder.DagBuilder("test_dag", dag_config, {})
+    actual = td.build()
+    assert sorted(actual["dag"].tags) == sorted(expected_tags)
+
+
 def test_make_task_valid():
     td = dagbuilder.DagBuilder("test_dag", DAG_CONFIG, DEFAULT_CONFIG)
     operator = get_bash_operator_path()
