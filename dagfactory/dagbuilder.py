@@ -727,7 +727,20 @@ class DagBuilder:
                         schedule.pop("datasets")
         else:
             schedule = dag_params.get("schedule")
-            if (
+            has_file_attr = isinstance(schedule, dict) and utils.check_dict_key(schedule, "file")
+            has_datasets_attr = isinstance(schedule, dict) and utils.check_dict_key(schedule, "datasets")
+
+            if has_file_attr and has_datasets_attr:
+                # Same handling as the Airflow 2 branch above. Both helpers
+                # already return Asset objects on Airflow 3, they were just
+                # never reached from here.
+                datasets_conditions: str = utils.parse_list_datasets(schedule.get("datasets"))
+                dag_kwargs[schedule_key] = DagBuilder.process_file_with_datasets(
+                    schedule.get("file"), datasets_conditions
+                )
+            elif has_datasets_attr:
+                dag_kwargs[schedule_key] = DagBuilder._build_datasets_schedule(schedule)
+            elif (
                 utils.check_dict_key(dag_params, "schedule")
                 and isinstance(schedule, str)
                 and schedule.strip().lower() == "none"
