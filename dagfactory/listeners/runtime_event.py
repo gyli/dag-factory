@@ -26,9 +26,9 @@ DAG_RUN = "dag_run"
 
 
 def is_dagfactory_dag(dag: DAG | None = None):
-    if "dagfactory" in dag.tags:
-        return True
-    return False
+    if dag is None:
+        return False
+    return "dagfactory" in (dag.tags or [])
 
 
 @hookimpl
