@@ -7,7 +7,7 @@ class DagFactoryException(Exception):
     """
 
 
-class DagFactoryConfigException(Exception):
+class DagFactoryConfigException(DagFactoryException):
     """
     Raise for dag-factory config errors.
     """
