@@ -1534,13 +1534,18 @@ class TestSchedule:
     def test_resolve_schedule_dataset_timetable_type(self):
         from airflow.timetables.trigger import CronTriggerTimetable
 
+        from airflow.timetables.assets import AssetOrTimeSchedule
+
         data = read_yml(schedule_path / "dataset_timetable.yml")
         schedule_data = {}
         DagBuilder.configure_schedule(cast_with_type(data), schedule_data)
         actual = schedule_data["schedule"]
-        assert actual["datasets"] == "((dataset_uri_1 & dataset_uri_2) | dataset_uri_3)"
 
-        actual_timetable = actual["timetable"]
+        # Airflow 3 rejects a raw dict here, so the datasets and timetable have
+        # to be resolved into an AssetOrTimeSchedule.
+        assert isinstance(actual, AssetOrTimeSchedule)
+
+        actual_timetable = actual.timetable
         assert isinstance(actual_timetable, CronTriggerTimetable)
         assert actual_timetable.serialize()["expression"] == "* * * * *"
         assert actual_timetable.serialize()["timezone"] == "UTC"
@@ -1604,6 +1609,30 @@ class TestConfigureSchedule:
         DagBuilder.configure_schedule(dag_params, dag_kwargs)
 
         assert dag_kwargs["schedule"] == expected_value
+
+    @pytest.mark.parametrize("airflow_major_version", [2, 3])
+    @pytest.mark.parametrize(
+        "datasets",
+        [
+            ["dataset_custom_1", "dataset_custom_2"],
+            "((dataset_custom_1 & dataset_custom_2) | dataset_custom_3)",
+        ],
+    )
+    def test_configure_schedule_file_and_datasets(self, patch_airflow_version, airflow_major_version, datasets):
+        # The file + datasets form used to be handled on Airflow 2 only, so on
+        # Airflow 3 the raw dict reached DAG() and was rejected.
+        patch_airflow_version(airflow_major_version)
+        dag_params = {
+            "schedule": {
+                "file": "dev/dags/datasets/example_config_datasets.yml",
+                "datasets": datasets,
+            }
+        }
+        dag_kwargs = {}
+
+        DagBuilder.configure_schedule(dag_params, dag_kwargs)
+
+        assert not isinstance(dag_kwargs["schedule"], dict)
 
     @pytest.mark.parametrize("none_value", ["none", "NONE", " none "])
     def test_configure_schedule_none_string_handling(self, patch_airflow_version, none_value):
