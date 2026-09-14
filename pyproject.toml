@@ -196,11 +196,13 @@ line-length = 120
 
 [tool.ruff.lint]
 select = ["C901", "D300", "I", "F"]
-ignore = ["F541", "C901"]
+ignore = ["F541"]
 
 [tool.ruff.lint.isort]
 combine-as-imports = true
 known-first-party = ["dagfactory", "tests"]
 
 [tool.ruff.lint.mccabe]
-max-complexity = 10
+# The current worst offenders sit at 18. Starting there so the check is
+# actually enforced, then lowering it as functions get split up.
+max-complexity = 18
