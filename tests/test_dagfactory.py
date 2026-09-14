@@ -576,6 +576,50 @@ def test_load_yaml_dags_folder_scan_forwards_defaults_config_path(tmp_path):
     assert globals_dict["example_dag"].tasks[0].depends_on_past == True
 
 
+def test_load_yaml_dags_accepts_multiple_dags_folders(tmp_path):
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+
+    shutil.copyfile(DAG_FACTORY_VARIABLES_AS_ARGUMENTS, first / "dag.yml")
+    with open(DAG_FACTORY_VARIABLES_AS_ARGUMENTS) as fp:
+        second_config = {f"otherfolder_{name}": config for name, config in yaml.safe_load(fp).items()}
+    with open(second / "dag.yml", "w") as fp:
+        yaml.dump(second_config, fp)
+
+    globals_dict = {}
+    load_yaml_dags(globals_dict=globals_dict, dags_folder=[str(first), str(second)])
+
+    loaded = {key for key, value in globals_dict.items() if hasattr(value, "dag_id")}
+    assert "example_dag" in loaded
+    assert "otherfolder_example_dag" in loaded
+
+
+def test_load_yaml_dags_applies_airflowignore_per_folder(monkeypatch, tmp_path):
+    monkeypatch.setattr(dagfactory, "_get_dag_ignore_file_syntax", lambda: "glob")
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+
+    shutil.copyfile(DAG_FACTORY_VARIABLES_AS_ARGUMENTS, first / "dag.yml")
+    with open(DAG_FACTORY_VARIABLES_AS_ARGUMENTS) as fp:
+        second_config = {f"otherfolder_{name}": config for name, config in yaml.safe_load(fp).items()}
+    with open(second / "dag.yml", "w") as fp:
+        yaml.dump(second_config, fp)
+
+    # Ignoring dag.yml in the second folder must not affect the first.
+    (second / ".airflowignore").write_text("dag.yml\n")
+
+    globals_dict = {}
+    load_yaml_dags(globals_dict=globals_dict, dags_folder=[str(first), str(second)])
+
+    loaded = {key for key, value in globals_dict.items() if hasattr(value, "dag_id")}
+    assert "example_dag" in loaded
+    assert "otherfolder_example_dag" not in loaded
+
+
 def test_load_yaml_dags_config_dict_forwards_defaults_config_path():
     globals_dict = {}
 
