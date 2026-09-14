@@ -31,10 +31,10 @@ example_external_task_sensor_dag_factory_consumer3:
     start_date: 2025-01-03
     schedule: "@daily"
   tasks:
-    - task_id: "wait_for_producer_task:"
+    - task_id: "wait_for_producer_task"
       operator: airflow.sensors.external_task.ExternalTaskSensor
       external_dag_id: example_external_task_sensor_dag_factory_producer
       external_task_id: producer_task
-      execution_delta: 1 days,
+      execution_delta: 1 days
     - task_id: "consumer_task"
       operator: airflow.operators.empty.EmptyOperator
