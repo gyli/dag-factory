@@ -378,6 +378,29 @@ def test_adjust_general_task_params_external_sensor_arguments():
     assert task_params["execution_delta"] == datetime.timedelta(days=1)
 
 
+@pytest.mark.parametrize(
+    "task_params",
+    [
+        {"execution_date_fn": "tests.utils.one_hour_ago", "execution_delta": "1 days"},
+        {
+            "execution_delta": "1 days",
+            "execution_date_fn_name": "one_hour_ago",
+            "execution_date_fn_file": "tests/utils.py",
+        },
+        {
+            "execution_date_fn": "tests.utils.one_hour_ago",
+            "execution_date_fn_name": "one_hour_ago",
+            "execution_date_fn_file": "tests/utils.py",
+        },
+    ],
+)
+def test_adjust_general_task_params_rejects_conflicting_external_sensor_arguments(task_params):
+    # Without the check these silently resolve to whichever option the
+    # if/elif chain reaches first.
+    with pytest.raises(DagFactoryConfigException, match="Only one of"):
+        DagBuilder.adjust_general_task_params(task_params)
+
+
 def test_make_task_valid():
     td = dagbuilder.DagBuilder("test_dag", DAG_CONFIG, DEFAULT_CONFIG)
     operator = get_bash_operator_path()
