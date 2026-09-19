@@ -112,16 +112,12 @@ class TestGeneratedProperties:
 
         assert schema["$defs"]["types"] == TYPES
 
-    def test_cross_field_rules_are_placed_by_scope(self, schema):
-        from dagfactory.parameters import CROSS_FIELD_RULES, Scope
-
-        for key, value in CROSS_FIELD_RULES[Scope.DAG].items():
-            assert schema[key] == value
-        for key, value in CROSS_FIELD_RULES[Scope.DEFAULT_ARGS].items():
-            assert schema["$defs"]["default_args"][key] == value
-
     def test_required_is_derived_from_the_registry(self, schema):
-        assert schema["required"] == [p.key for p in PARAMS if p.required_in_yaml]
+        from dagfactory.parameters import Scope
+
+        # A key satisfiable in more than one scope is x-required-anywhere instead.
+        expected = [p.key for p in PARAMS if p.required_in_yaml and p.scope is Scope.DAG]
+        assert schema["required"] == expected
 
 
 class TestBuildAndLintAgree:
@@ -145,3 +141,67 @@ class TestBuildAndLintAgree:
                 assert target.max_version == param.max_version, (
                     f"'{param.key}' is bounded at {param.max_version} but maps to " f"'{target.key}', which is not"
                 )
+
+
+class TestDerivedCrossFieldRules:
+    """The rules that span keys are derived too; only their wording is written."""
+
+    @pytest.fixture(scope="class")
+    def schema(self):
+        return generate.build_schema()
+
+    def test_every_exclusive_group_is_declared_and_has_members(self):
+        from dagfactory.parameters import EXCLUSIVE_GROUPS
+
+        members = {}
+        for param in PARAMS:
+            if param.exclusive_group:
+                members.setdefault(param.exclusive_group, []).append(param.key)
+        assert set(members) == set(EXCLUSIVE_GROUPS), "a group is declared but unused, or used but undeclared"
+        for name, keys in members.items():
+            assert len(keys) > 1, f"exclusive group '{name}' has a single member"
+
+    def test_exclusive_groups_match_their_members(self, schema):
+        rules = {tuple(sorted(rule["fields"])): rule for rule in schema["x-mutually-exclusive"]}
+        groups = {}
+        for param in PARAMS:
+            if param.exclusive_group:
+                groups.setdefault(param.exclusive_group, []).append(param.key)
+        for keys in groups.values():
+            assert tuple(sorted(keys)) in rules
+
+    def test_deprecated_aliases_are_exclusive_without_a_group(self, schema):
+        pairs = {tuple(sorted(rule["fields"])) for rule in schema["x-mutually-exclusive"]}
+        for param in PARAMS:
+            if param.deprecated_in_favor_of:
+                assert tuple(sorted([param.key, param.deprecated_in_favor_of])) in pairs
+                # The pairing comes from deprecated_in_favor_of, not a group.
+                assert param.exclusive_group is None
+
+    def test_dependent_required_comes_from_requires(self, schema):
+        from dagfactory.parameters import Scope
+
+        for scope, node in ((Scope.DAG, schema), (Scope.DEFAULT_ARGS, schema["$defs"]["default_args"])):
+            expected = {p.key: list(p.requires) for p in PARAMS if p.requires and scope in p.scope}
+            assert node["dependentRequired"] == expected
+
+    def test_requires_only_names_known_keys(self):
+        for param in PARAMS:
+            for other in param.requires:
+                assert other in PARAMS_BY_KEY, f"'{param.key}' requires unknown key '{other}'"
+
+    def test_required_anywhere_lists_every_scope_the_key_allows(self, schema):
+        from dagfactory.parameters import Scope
+
+        for rule in schema["x-required-anywhere"]:
+            key = rule["fields"][0]
+            param = PARAMS_BY_KEY[key]
+            expected = [key] if Scope.DAG in param.scope else []
+            if Scope.DEFAULT_ARGS in param.scope:
+                expected.append(f"default_args.{key}")
+            assert rule["fields"] == expected
+
+    def test_no_rule_names_an_unknown_key(self, schema):
+        for rule in schema["x-mutually-exclusive"]:
+            for field in rule["fields"]:
+                assert field in PARAMS_BY_KEY

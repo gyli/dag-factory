@@ -34,7 +34,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum, Flag, auto
 from functools import lru_cache
-from typing import Any, Callable, Dict, List, Mapping, Optional
+from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 from packaging.version import Version, parse as parse_version
 
@@ -97,7 +97,13 @@ class Param:
         ``_build_dag_kwargs`` cannot proceed without it, but dag-factory fills
         it in from the YAML key, so an author need not write it.
     :param required_in_yaml: the author must write this key; the linter reports
-        its absence.
+        its absence. A key valid in several scopes may be satisfied in any of
+        them, which the schema expresses as ``x-required-anywhere``.
+    :param requires: keys that must also be set whenever this one is; becomes
+        ``dependentRequired``.
+    :param exclusive_group: name of an :data:`EXCLUSIVE_GROUPS` entry. Keys
+        sharing a group may not be set together. A deprecated key and the key
+        it defers to are mutually exclusive without needing a group.
     :param transform: applied to the raw YAML value before it reaches the
         ``DAG`` constructor.
     :param json_schema: JSON Schema fragment describing accepted values.
@@ -116,6 +122,8 @@ class Param:
     deprecated_in_favor_of: Optional[str] = None
     required: bool = False
     required_in_yaml: bool = False
+    requires: Tuple[str, ...] = ()
+    exclusive_group: Optional[str] = None
     transform: Optional[Callable[[Any], Any]] = None
     json_schema: Optional[Mapping[str, Any]] = None
     description: Optional[str] = None
@@ -193,12 +201,6 @@ PARAMS: List[Param] = [
     ),
     Param("dag_display_name", json_schema={"type": "string"}),
     Param("description", json_schema={"type": "string"}),
-    Param(
-        "timetable",
-        max_version="3.0.0",
-        description="Airflow 3+ accepts a Timetable instance via `schedule` instead of a separate kwarg.",
-        json_schema={"type": "object"},
-    ),
     Param("catchup", json_schema={"type": "boolean"}),
     Param(
         "concurrency",
@@ -219,18 +221,20 @@ PARAMS: List[Param] = [
     Param("template_searchpath", json_schema=STRING_OR_STRING_ARRAY),
     Param("render_template_as_native_obj", json_schema={"type": "boolean"}),
     Param("sla_miss_callback", max_version="3.1.0", deprecated_since="2.0", json_schema=CALLBACK),
-    Param("doc_md", json_schema={"type": "string"}),
+    Param("doc_md", exclusive_group="doc_md", json_schema={"type": "string"}),
     Param("access_control", json_schema={"type": "object"}),
     Param("is_paused_upon_creation", json_schema={"type": "boolean"}),
     Param("params", json_schema={"type": "object"}),
     Param("user_defined_macros", transform=resolve_user_defined_macros, json_schema={"type": "object"}),
     Param("default_args", json_schema={"$ref": "#/$defs/default_args"}),
     # ------------------------------------------------------------------
-    # DAG-level, interpreted by dag-factory rather than forwarded
+    # Scheduling. `schedule` and `schedule_interval` are interpreted by
+    # configure_schedule(); `timetable` is forwarded, on Airflow 2 only.
     # ------------------------------------------------------------------
     Param(
         "schedule",
         handling=Handling.CUSTOM,
+        exclusive_group="schedule",
         json_schema={
             "anyOf": [
                 {"type": "string"},
@@ -245,6 +249,7 @@ PARAMS: List[Param] = [
     Param(
         "schedule_interval",
         handling=Handling.CUSTOM,
+        exclusive_group="schedule",
         max_version="3.0.0",
         deprecated_since="2.4",
         description="Use `schedule` instead.",
@@ -258,6 +263,16 @@ PARAMS: List[Param] = [
             ]
         },
     ),
+    Param(
+        "timetable",
+        max_version="3.0.0",
+        exclusive_group="schedule",
+        description="Airflow 3+ accepts a Timetable instance via `schedule` instead of a separate kwarg.",
+        json_schema={"type": "object"},
+    ),
+    # ------------------------------------------------------------------
+    # DAG-level, interpreted by dag-factory rather than forwarded
+    # ------------------------------------------------------------------
     Param("tags", handling=Handling.CUSTOM, json_schema={"type": "array", "items": {"type": "string"}}),
     # ------------------------------------------------------------------
     # DAG-level, valid Airflow arguments dag-factory does not wire through
@@ -293,6 +308,7 @@ PARAMS: List[Param] = [
     Param(
         "start_date",
         DAG_AND_DEFAULTS,
+        required_in_yaml=True,
         description="May be set on the DAG body or under default_args.",
         json_schema={"type": "string"},
     ),
@@ -334,6 +350,7 @@ PARAMS: List[Param] = [
         "doc_md_file_path",
         handling=Handling.CUSTOM,
         origin=Origin.DAGFACTORY,
+        exclusive_group="doc_md",
         description="Path to a markdown file whose contents are assigned to dag.doc_md.",
         json_schema={"type": "string"},
     ),
@@ -341,6 +358,8 @@ PARAMS: List[Param] = [
         "doc_md_python_callable_file",
         handling=Handling.CUSTOM,
         origin=Origin.DAGFACTORY,
+        exclusive_group="doc_md",
+        requires=("doc_md_python_callable_name",),
         description="Path to a Python file containing a callable that returns markdown.",
         json_schema={"type": "string"},
     ),
@@ -348,6 +367,7 @@ PARAMS: List[Param] = [
         "doc_md_python_callable_name",
         handling=Handling.CUSTOM,
         origin=Origin.DAGFACTORY,
+        requires=("doc_md_python_callable_file",),
         description="Name of the callable inside doc_md_python_callable_file.",
         json_schema={"type": "string"},
     ),
@@ -355,6 +375,7 @@ PARAMS: List[Param] = [
         "doc_md_python_arguments",
         handling=Handling.CUSTOM,
         origin=Origin.DAGFACTORY,
+        requires=("doc_md_python_callable_name",),
         description="Keyword arguments passed to doc_md_python_callable_name.",
         json_schema={"type": "object"},
     ),
@@ -367,7 +388,13 @@ PARAMS: List[Param] = [
     Param("email_on_retry", TASK_LEVEL, handling=Handling.CUSTOM, json_schema={"type": "boolean"}),
     Param("retries", TASK_LEVEL, handling=Handling.CUSTOM, json_schema={"type": "integer", "minimum": 0}),
     Param("retry_delay", TASK_LEVEL, handling=Handling.CUSTOM, json_schema=TIMEDELTA_LIKE),
-    Param("retry_exponential_backoff", TASK_LEVEL, handling=Handling.CUSTOM, json_schema={"type": "boolean"}),
+    Param(
+        "retry_exponential_backoff",
+        TASK_LEVEL,
+        handling=Handling.CUSTOM,
+        requires=("max_retry_delay",),
+        json_schema={"type": "boolean"},
+    ),
     Param("max_retry_delay", TASK_LEVEL, handling=Handling.CUSTOM, json_schema=TIMEDELTA_LIKE),
     Param("depends_on_past", TASK_LEVEL, handling=Handling.CUSTOM, json_schema={"type": "boolean"}),
     Param("wait_for_downstream", TASK_LEVEL, handling=Handling.CUSTOM, json_schema={"type": "boolean"}),
@@ -390,39 +417,12 @@ PARAMS: List[Param] = [
     Param("on_execute_callback", TASK_LEVEL, handling=Handling.CUSTOM, json_schema=CALLBACK),
 ]
 
-#: Rules that span more than one key, so they belong to no single entry,
-#: keyed by the scope whose subschema carries them.
-CROSS_FIELD_RULES: Dict[Scope, Dict[str, Any]] = {
-    Scope.DAG: {
-        "dependentRequired": {
-            "doc_md_python_callable_file": ["doc_md_python_callable_name"],
-            "doc_md_python_callable_name": ["doc_md_python_callable_file"],
-            "doc_md_python_arguments": ["doc_md_python_callable_name"],
-        },
-        "x-mutually-exclusive": [
-            {
-                "fields": ["schedule", "schedule_interval", "timetable"],
-                "message": "Only one of `schedule`, `schedule_interval`, or `timetable` may be set.",
-            },
-            {
-                "fields": ["concurrency", "max_active_tasks"],
-                "message": "`concurrency` is a deprecated alias for `max_active_tasks`; do not set both.",
-            },
-            {
-                "fields": ["doc_md", "doc_md_file_path", "doc_md_python_callable_file"],
-                "message": "Pick a single source for `doc_md`: an inline string, a file path, or a python callable.",
-            },
-        ],
-        "x-required-anywhere": [
-            {
-                "fields": ["start_date", "default_args.start_date"],
-                "message": "A `start_date` must be set on the DAG body or under default_args.",
-            },
-        ],
-    },
-    Scope.DEFAULT_ARGS: {
-        "dependentRequired": {"retry_exponential_backoff": ["max_retry_delay"]},
-    },
+#: Mutually exclusive groups. Membership is derived from the ``exclusive_group``
+#: field on each entry; only the wording lives here. ``{fields}`` interpolates
+#: the derived member list.
+EXCLUSIVE_GROUPS: Dict[str, str] = {
+    "schedule": "Only one of {fields} may be set.",
+    "doc_md": "Pick a single source for `doc_md`: an inline string, a file path, or a python callable.",
 }
 
 PARAMS_BY_KEY: Dict[str, Param] = {param.key: param for param in PARAMS}

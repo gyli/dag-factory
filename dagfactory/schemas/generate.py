@@ -18,10 +18,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from dagfactory.parameters import (
-    CROSS_FIELD_RULES,
+    EXCLUSIVE_GROUPS,
     PARAMS,
     TYPES,
     UNSUPPORTED_ARGS_ISSUE,
@@ -97,6 +97,82 @@ def property_for(param: Param) -> Dict[str, Any]:
     return definition
 
 
+def _join(fields: List[str]) -> str:
+    """`a`, `b`, or `c`."""
+    quoted = [f"`{field}`" for field in fields]
+    if len(quoted) == 1:
+        return quoted[0]
+    if len(quoted) == 2:
+        return f"{quoted[0]} or {quoted[1]}"
+    return ", ".join(quoted[:-1]) + f", or {quoted[-1]}"
+
+
+def mutually_exclusive() -> List[Dict[str, Any]]:
+    """Derived from ``exclusive_group`` and from deprecated aliases.
+
+    A deprecated key and the key it defers to are mutually exclusive by
+    definition, so that pairing needs no group.
+    """
+    groups: Dict[str, List[str]] = {}
+    for param in PARAMS:
+        if param.exclusive_group:
+            groups.setdefault(param.exclusive_group, []).append(param.key)
+
+    rules = [
+        {"fields": fields, "message": EXCLUSIVE_GROUPS[name].format(fields=_join(fields))}
+        for name, fields in groups.items()
+    ]
+    rules += [
+        {
+            "fields": [param.key, param.deprecated_in_favor_of],
+            "message": (
+                f"`{param.key}` is a deprecated alias for " f"`{param.deprecated_in_favor_of}`; do not set both."
+            ),
+        }
+        for param in PARAMS
+        if param.deprecated_in_favor_of
+    ]
+    return rules
+
+
+#: How each scope reads in a sentence.
+_SCOPE_PROSE = {Scope.DAG: "on the DAG body", Scope.TASK: "on the task", Scope.DEFAULT_ARGS: "under default_args"}
+
+
+def required_anywhere() -> List[Dict[str, Any]]:
+    """Keys that must be set, but may be satisfied in any scope they belong to."""
+    rules = []
+    for param in PARAMS:
+        if not param.required_in_yaml:
+            continue
+        fields = _paths_for(param)
+        if len(fields) <= 1:
+            continue
+        places = [prose for scope, prose in _SCOPE_PROSE.items() if scope in param.scope]
+        rules.append(
+            {
+                "fields": fields,
+                "message": f"A `{param.key}` must be set {' or '.join(places)}.",
+            }
+        )
+    return rules
+
+
+def _paths_for(param: Param) -> List[str]:
+    """Every place an author may write this key, as a dotted path from the DAG body."""
+    paths = []
+    if Scope.DAG in param.scope:
+        paths.append(param.key)
+    if Scope.DEFAULT_ARGS in param.scope:
+        paths.append(f"default_args.{param.key}")
+    return paths
+
+
+def dependent_required(scope: Scope) -> Dict[str, List[str]]:
+    """Derived from each entry's ``requires``, for the keys valid in *scope*."""
+    return {param.key: list(param.requires) for param in PARAMS if param.requires and scope in param.scope}
+
+
 def build_schema() -> Dict[str, Any]:
     """Returns the complete schema, derived entirely from the registry."""
     defs: Dict[str, Any] = {"types": TYPES}
@@ -115,8 +191,13 @@ def build_schema() -> Dict[str, Any]:
 
     # default_args is validated as a subschema in its own right; the other
     # sections are definition bags whose members are referenced individually.
-    defs["default_args"].update({"type": "object", "additionalProperties": True})
-    defs["default_args"].update(CROSS_FIELD_RULES.get(Scope.DEFAULT_ARGS, {}))
+    defs["default_args"].update(
+        {
+            "type": "object",
+            "additionalProperties": True,
+            "dependentRequired": dependent_required(Scope.DEFAULT_ARGS),
+        }
+    )
 
     schema = {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -127,9 +208,11 @@ def build_schema() -> Dict[str, Any]:
         "$defs": defs,
         "properties": {param.key: ref_to(param) for param in PARAMS if Scope.DAG in param.scope},
         "additionalProperties": True,
-        "required": [param.key for param in PARAMS if param.required_in_yaml],
+        "required": [param.key for param in PARAMS if param.required_in_yaml and len(_paths_for(param)) == 1],
+        "dependentRequired": dependent_required(Scope.DAG),
+        "x-mutually-exclusive": mutually_exclusive(),
+        "x-required-anywhere": required_anywhere(),
     }
-    schema.update(CROSS_FIELD_RULES.get(Scope.DAG, {}))
     return schema
 
 

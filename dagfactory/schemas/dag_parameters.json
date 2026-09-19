@@ -612,6 +612,14 @@
   "x-mutually-exclusive": [
     {
       "fields": [
+        "doc_md",
+        "doc_md_file_path",
+        "doc_md_python_callable_file"
+      ],
+      "message": "Pick a single source for `doc_md`: an inline string, a file path, or a python callable."
+    },
+    {
+      "fields": [
         "schedule",
         "schedule_interval",
         "timetable"
@@ -624,14 +632,6 @@
         "max_active_tasks"
       ],
       "message": "`concurrency` is a deprecated alias for `max_active_tasks`; do not set both."
-    },
-    {
-      "fields": [
-        "doc_md",
-        "doc_md_file_path",
-        "doc_md_python_callable_file"
-      ],
-      "message": "Pick a single source for `doc_md`: an inline string, a file path, or a python callable."
     }
   ],
   "x-required-anywhere": [

@@ -122,6 +122,12 @@ Each entry declares the scopes it is valid in (`DAG`, `TASK`, `DEFAULT_ARGS`),
 and the generator derives the `$defs` sections from that: a key is defined once
 and referenced from the other sections it belongs to.
 
+The cross-field rules are derived as well. `dependentRequired` comes from each
+entry's `requires`; `x-mutually-exclusive` from `exclusive_group`, plus every
+deprecated key paired with the key it defers to; `x-required-anywhere` from a
+`required_in_yaml` key that is valid in more than one scope. Only the wording of
+a named exclusive group is written by hand, in `EXCLUSIVE_GROUPS`.
+
 After editing the registry, regenerate:
 
 ```bash
