@@ -1,5 +1,7 @@
+import copy
 import datetime
 import functools
+import logging
 import os
 from datetime import timedelta
 from pathlib import Path
@@ -7,8 +9,7 @@ from unittest.mock import mock_open, patch
 
 import pendulum
 import pytest
-import logging
-import copy
+
 from dagfactory._yaml import load_yaml_file
 
 try:
@@ -19,6 +20,7 @@ except ImportError:
 import yaml
 from airflow.providers.common.sql.sensors.sql import SqlSensor
 from airflow.providers.http.sensors.http import HttpSensor
+
 try:
     from airflow.sdk.module_loading import import_string
 except ImportError:
@@ -51,7 +53,7 @@ BashOperator = import_string(get_bash_operator_path())
 PythonOperator = import_string(get_python_operator_path())
 
 
-from dagfactory import dagbuilder
+from dagfactory import dagbuilder, parameters
 
 try:
     from airflow.sdk.definitions.mappedoperator import MappedOperator
@@ -856,11 +858,7 @@ def test_set_callback_with_list():
     assert result[0].keywords["param_2"] == "value_2"
 
     # --- list with a dict entry that has no extra kwargs (partial with no kwargs) ---
-    params = {
-        "on_failure_callback": [
-            {"callback": f"{__name__}.print_context_callback"}
-        ]
-    }
+    params = {"on_failure_callback": [{"callback": f"{__name__}.print_context_callback"}]}
     result = DagBuilder.set_callback(parameters=params, callback_type="on_failure_callback")
     assert isinstance(result, list)
     assert isinstance(result[0], functools.partial)
@@ -908,11 +906,7 @@ def test_set_callback_with_list():
     import unittest.mock as mock
 
     with mock.patch("dagfactory.dagbuilder.import_string", return_value=dummy_notifier_factory):
-        params = {
-            "on_failure_callback": [
-                {"callback": "my.dummy.notifier", "channel": "#alerts"}
-            ]
-        }
+        params = {"on_failure_callback": [{"callback": "my.dummy.notifier", "channel": "#alerts"}]}
         result = DagBuilder.set_callback(parameters=params, callback_type="on_failure_callback")
 
     assert isinstance(result, list)
@@ -1149,18 +1143,13 @@ def test_make_dag_with_task_group_callbacks_default_args():
     if version.parse(AIRFLOW_VERSION) >= version.parse("3.0.0"):
         assert isinstance(dag.task_dict["task_group_1.task_2"].on_failure_callback[0], functools.partial)
         assert callable(dag.task_dict["task_group_1.task_2"].on_failure_callback[0])
-        assert (
-            dag.task_dict["task_group_1.task_2"].on_failure_callback[0].func.__name__
-            == "empty_callback_with_params"
-        )
+        assert dag.task_dict["task_group_1.task_2"].on_failure_callback[0].func.__name__ == "empty_callback_with_params"
         assert "param_1" in dag.task_dict["task_group_1.task_2"].on_failure_callback[0].keywords
         assert dag.task_dict["task_group_1.task_2"].on_failure_callback[0].keywords.get("param_1") == "value_1"
     else:
         assert isinstance(dag.task_dict["task_group_1.task_2"].on_failure_callback, functools.partial)
         assert callable(dag.task_dict["task_group_1.task_2"].on_failure_callback)
-        assert (
-            dag.task_dict["task_group_1.task_2"].on_failure_callback.func.__name__ == "empty_callback_with_params"
-        )
+        assert dag.task_dict["task_group_1.task_2"].on_failure_callback.func.__name__ == "empty_callback_with_params"
         assert "param_1" in dag.task_dict["task_group_1.task_2"].on_failure_callback.keywords
         assert dag.task_dict["task_group_1.task_2"].on_failure_callback.keywords.get("param_1") == "value_1"
 
@@ -1438,8 +1427,20 @@ class TestSchedule:
         actual = schedule_data["schedule"]
         assert isinstance(actual, AssetAll)
         assert list(actual.objects) == [
-            Asset(name="s3://dag1/output_1.txt", uri="s3://dag1/output_1.txt", group="asset", extra={"hi": "bye"}, watchers=[]),
-            Asset(name="s3://dag2/output_1.txt", uri="s3://dag2/output_1.txt", group="asset", extra={"hi": "bye"}, watchers=[]),
+            Asset(
+                name="s3://dag1/output_1.txt",
+                uri="s3://dag1/output_1.txt",
+                group="asset",
+                extra={"hi": "bye"},
+                watchers=[],
+            ),
+            Asset(
+                name="s3://dag2/output_1.txt",
+                uri="s3://dag2/output_1.txt",
+                group="asset",
+                extra={"hi": "bye"},
+                watchers=[],
+            ),
         ]
 
     @pytest.mark.skipif(INSTALLED_AIRFLOW_VERSION.major < 3, reason="Requires Airflow >= 3.0.0")
@@ -1450,8 +1451,20 @@ class TestSchedule:
         actual = schedule_data["schedule"]
         assert isinstance(actual, AssetAny)
         assert list(actual.objects) == [
-            Asset(name="s3://dag1/output_1.txt", uri="s3://dag1/output_1.txt", group="asset", extra={"hi": "bye"}, watchers=[]),
-            Asset(name="s3://dag2/output_1.txt", uri="s3://dag2/output_1.txt", group="asset", extra={"hi": "bye"}, watchers=[]),
+            Asset(
+                name="s3://dag1/output_1.txt",
+                uri="s3://dag1/output_1.txt",
+                group="asset",
+                extra={"hi": "bye"},
+                watchers=[],
+            ),
+            Asset(
+                name="s3://dag2/output_1.txt",
+                uri="s3://dag2/output_1.txt",
+                group="asset",
+                extra={"hi": "bye"},
+                watchers=[],
+            ),
         ]
 
     @pytest.mark.skipif(INSTALLED_AIRFLOW_VERSION.major < 3, reason="Requires Airflow >= 3.0.0")
@@ -1463,8 +1476,20 @@ class TestSchedule:
         assert isinstance(actual, AssetAny)
         assert isinstance(actual.objects[0], AssetAll)
         assert list(actual.objects[0].objects) == [
-            Asset(name="s3://dag1/output_1.txt", uri="s3://dag1/output_1.txt", group="asset", extra={"hi": "bye"}, watchers=[]),
-            Asset(name="s3://dag2/output_1.txt", uri="s3://dag2/output_1.txt", group="asset", extra={"hi": "bye"}, watchers=[]),
+            Asset(
+                name="s3://dag1/output_1.txt",
+                uri="s3://dag1/output_1.txt",
+                group="asset",
+                extra={"hi": "bye"},
+                watchers=[],
+            ),
+            Asset(
+                name="s3://dag2/output_1.txt",
+                uri="s3://dag2/output_1.txt",
+                group="asset",
+                extra={"hi": "bye"},
+                watchers=[],
+            ),
         ]
         assert actual.objects[1] == Asset(
             name="s3://dag3/output_3.txt", uri="s3://dag3/output_3.txt", group="asset", extra={"hi": "bye"}, watchers=[]
@@ -1544,6 +1569,7 @@ class TestSchedule:
         assert isinstance(actual_timetable, CronTriggerTimetable)
         assert actual_timetable.serialize()["expression"] == "* * * * *"
         assert actual_timetable.serialize()["timezone"] == "UTC"
+
 
 # ===============================
 # Test ConfigureSchedule
@@ -1796,7 +1822,7 @@ class TestTopologicalSortTasks:
 
 
 class TestBuildDagKwargs:
-    """Unit tests for the spec-driven _build_dag_kwargs helper."""
+    """Unit tests for the registry-driven _build_dag_kwargs helper."""
 
     def _call(self, dag_params):
         return dagbuilder.DagBuilder._build_dag_kwargs(dag_params)
@@ -1827,8 +1853,6 @@ class TestBuildDagKwargs:
             self._call({})
 
     # ------------------------------------------------------------------
-    # deprecated_alias: concurrency → max_active_tasks
-    # ------------------------------------------------------------------
     # deprecated_in_favor_of
     # ------------------------------------------------------------------
 
@@ -1847,8 +1871,8 @@ class TestBuildDagKwargs:
         assert result["max_active_tasks"] == 7
 
     def test_canonical_wins_when_both_deprecated_and_canonical_set(self):
-        # concurrency entry comes first in spec and writes max_active_tasks=5,
-        # then max_active_tasks entry overwrites with the canonical value 7.
+        # The concurrency entry comes first in DAG_PARAMS and writes max_active_tasks=5,
+        # then the max_active_tasks entry overwrites with the canonical value 7.
         with pytest.warns(DeprecationWarning, match="concurrency"):
             result = self._call({"dag_id": "d", "concurrency": 5, "max_active_tasks": 7})
         assert result["max_active_tasks"] == 7
@@ -1858,76 +1882,63 @@ class TestBuildDagKwargs:
     # ------------------------------------------------------------------
 
     def test_min_version_param_skipped_silently_when_absent(self):
-        # dag_display_name requires >= 2.9.0; if not set, no warning, just absent
         import warnings as _warnings
 
-        with _warnings.catch_warnings():
-            _warnings.simplefilter("error")
-            result = self._call({"dag_id": "d"})
-        assert "dag_display_name" not in result
+        params = parameters.DAG_PARAMS + [parameters.DagParam("gated_key", min_version="2.9.0")]
+        with patch.object(dagbuilder, "DAG_PARAMS", params):
+            with _warnings.catch_warnings():
+                _warnings.simplefilter("error")
+                result = self._call({"dag_id": "d"})
+        assert "gated_key" not in result
 
     def test_min_version_param_included_when_version_satisfied(self):
-        # Patch INSTALLED_AIRFLOW_VERSION to a version that satisfies 2.9.0
-        from packaging import version as pkg_version
-        from unittest.mock import patch
-
-        with patch.object(dagbuilder, "INSTALLED_AIRFLOW_VERSION", pkg_version.parse("2.9.0")):
-            result = self._call({"dag_id": "d", "dag_display_name": "Pretty DAG"})
-        assert result.get("dag_display_name") == "Pretty DAG"
+        params = parameters.DAG_PARAMS + [parameters.DagParam("gated_key", min_version="2.9.0")]
+        with patch.object(dagbuilder, "DAG_PARAMS", params):
+            with patch.object(dagbuilder, "INSTALLED_AIRFLOW_VERSION", version.parse("2.9.0")):
+                result = self._call({"dag_id": "d", "gated_key": "hi"})
+        assert result.get("gated_key") == "hi"
 
     def test_min_version_violation_emits_warning_and_ignores_param(self):
-        from packaging import version as pkg_version
-        from unittest.mock import patch
-
-        with patch.object(dagbuilder, "INSTALLED_AIRFLOW_VERSION", pkg_version.parse("2.8.0")):
-            with pytest.warns(UserWarning, match="dag_display_name"):
-                result = self._call({"dag_id": "d", "dag_display_name": "Pretty DAG"})
-        assert "dag_display_name" not in result
+        params = parameters.DAG_PARAMS + [parameters.DagParam("gated_key", min_version="2.9.0")]
+        with patch.object(dagbuilder, "DAG_PARAMS", params):
+            with patch.object(dagbuilder, "INSTALLED_AIRFLOW_VERSION", version.parse("2.8.0")):
+                with pytest.warns(UserWarning, match="gated_key"):
+                    result = self._call({"dag_id": "d", "gated_key": "hi"})
+        assert "gated_key" not in result
 
     # ------------------------------------------------------------------
     # max_version gating
     # ------------------------------------------------------------------
 
     def test_max_version_param_included_when_version_below_limit(self):
-        from packaging import version as pkg_version
-        from unittest.mock import patch
-
-        with patch.object(dagbuilder, "INSTALLED_AIRFLOW_VERSION", pkg_version.parse("2.10.0")):
+        with patch.object(dagbuilder, "INSTALLED_AIRFLOW_VERSION", version.parse("2.10.0")):
             result = self._call({"dag_id": "d", "default_view": "graph"})
         assert result.get("default_view") == "graph"
 
     def test_max_version_violation_emits_warning_and_ignores_param(self):
-        from packaging import version as pkg_version
-        from unittest.mock import patch
-
-        with patch.object(dagbuilder, "INSTALLED_AIRFLOW_VERSION", pkg_version.parse("3.0.0")):
+        with patch.object(dagbuilder, "INSTALLED_AIRFLOW_VERSION", version.parse("3.0.0")):
             with pytest.warns(UserWarning, match="default_view"):
                 result = self._call({"dag_id": "d", "default_view": "graph"})
         assert "default_view" not in result
 
     def test_max_version_param_absent_no_warning_even_above_limit(self):
-        # default_view not set → no warning, even on Airflow 3+
-        from packaging import version as pkg_version
-        from unittest.mock import patch
+        # default_view not set -> no warning, even on Airflow 3+
         import warnings as _warnings
 
-        with patch.object(dagbuilder, "INSTALLED_AIRFLOW_VERSION", pkg_version.parse("3.0.0")):
+        with patch.object(dagbuilder, "INSTALLED_AIRFLOW_VERSION", version.parse("3.0.0")):
             with _warnings.catch_warnings():
                 _warnings.simplefilter("error", UserWarning)
                 result = self._call({"dag_id": "d"})
         assert "default_view" not in result
 
     def test_sla_miss_callback_max_version(self):
-        from packaging import version as pkg_version
-        from unittest.mock import patch
-
         # Included on Airflow < 3.1.0
-        with patch.object(dagbuilder, "INSTALLED_AIRFLOW_VERSION", pkg_version.parse("3.0.0")):
+        with patch.object(dagbuilder, "INSTALLED_AIRFLOW_VERSION", version.parse("3.0.0")):
             result = self._call({"dag_id": "d", "sla_miss_callback": "my_cb"})
         assert result.get("sla_miss_callback") == "my_cb"
 
         # Ignored on Airflow >= 3.1.0
-        with patch.object(dagbuilder, "INSTALLED_AIRFLOW_VERSION", pkg_version.parse("3.1.0")):
+        with patch.object(dagbuilder, "INSTALLED_AIRFLOW_VERSION", version.parse("3.1.0")):
             with pytest.warns(UserWarning, match="sla_miss_callback"):
                 result = self._call({"dag_id": "d", "sla_miss_callback": "my_cb"})
         assert "sla_miss_callback" not in result
@@ -1937,29 +1948,27 @@ class TestBuildDagKwargs:
     # ------------------------------------------------------------------
 
     def test_transform_is_applied_to_value(self):
-        from dagfactory import dagbuilder as db
-        from dagfactory.dagbuilder import _DAG_PARAM_SPEC
-
-        # Temporarily inject a spec entry with a transform
         transform_called_with = []
 
         def my_transform(value):
             transform_called_with.append(value)
             return value * 2
 
-        extra = {"key": "max_active_runs", "transform": my_transform}
-        patched_spec = _DAG_PARAM_SPEC + [extra]
-
-        with patch.object(db, "_DAG_PARAM_SPEC", patched_spec):
+        params = parameters.DAG_PARAMS + [parameters.DagParam("max_active_runs", transform=my_transform)]
+        with patch.object(dagbuilder, "DAG_PARAMS", params):
             result = self._call({"dag_id": "d", "max_active_runs": 3})
 
         assert transform_called_with == [3]
-        # The last entry in the patched spec overwrites the earlier plain entry
+        # The last matching entry overwrites the earlier plain entry
         assert result["max_active_runs"] == 6
 
     def test_no_transform_copies_value_directly(self):
         result = self._call({"dag_id": "d", "max_active_runs": 4})
         assert result["max_active_runs"] == 4
+
+    def test_user_defined_macros_transform_runs_through_the_registry(self):
+        result = self._call({"dag_id": "d", "user_defined_macros": {"ds": "pendulum.now"}})
+        assert result["user_defined_macros"]["ds"] is pendulum.now
 
 
 # Tests for DagBuilder._resolve_user_defined_macros

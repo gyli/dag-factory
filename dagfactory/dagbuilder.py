@@ -15,6 +15,7 @@ from typing import Any, Callable, Dict, List, Tuple, Union
 
 from packaging import version
 
+from dagfactory.parameters import DAG_PARAMS
 from dagfactory.utils import check_dict_key
 
 try:
@@ -148,46 +149,6 @@ from dagfactory.exceptions import DagFactoryConfigException, DagFactoryException
 SYSTEM_PARAMS: List[str] = ["operator", "dependencies", "task_group_name", "parent_group_name"]
 INSTALLED_AIRFLOW_VERSION = version.parse(AIRFLOW_VERSION)
 
-# Declarative spec for DAG-level parameters passed to the DAG constructor.
-# Keys:
-#   key                    - the DAG constructor kwarg name (also the dag_params lookup key)
-#   required               - raise DagFactoryConfigException if absent
-#   min_version            - only applicable when Airflow >= this version (Version object); warn+skip if param is set below this
-#   max_version            - only applicable when Airflow <  this version (Version object); warn+skip if param is set at/above this
-#   deprecated_in_favor_of - this key is deprecated; when present, warn and write the value to the given canonical key.
-#                            must appear before the canonical key in the spec so the canonical key wins when both are set.
-#                            warning message is auto-generated from key and deprecated_in_favor_of.
-#   transform              - optional module-level callable applied to the raw dag_params value before writing to dag_kwargs.
-#                            must be defined at module level (before this spec) to avoid forward-reference issues.
-_DAG_PARAM_SPEC: List[Dict[str, Any]] = [
-    {"key": "dag_id", "required": True},
-    {"key": "dag_display_name", "min_version": version.parse("2.9.0")},
-    {"key": "description"},
-    {
-        "key": "concurrency",
-        "deprecated_in_favor_of": "max_active_tasks",
-    },
-    {"key": "max_active_tasks"},
-    {"key": "catchup"},
-    {"key": "max_active_runs"},
-    {"key": "dagrun_timeout"},
-    {"key": "default_view", "max_version": version.parse("3.0.0")},
-    {"key": "orientation", "max_version": version.parse("3.0.0")},
-    {"key": "template_searchpath"},
-    {"key": "render_template_as_native_obj"},
-    {"key": "sla_miss_callback", "max_version": version.parse("3.1.0")},
-    {"key": "on_success_callback"},
-    {"key": "on_failure_callback"},
-    {"key": "default_args"},
-    {"key": "doc_md"},
-    {"key": "access_control"},
-    {"key": "is_paused_upon_creation"},
-    {"key": "params"},
-    {"key": "start_date"},
-    {"key": "end_date"},
-    {"key": "timetable"},
-]
-
 
 class DagBuilder:
     """
@@ -318,25 +279,8 @@ class DagBuilder:
 
     @staticmethod
     def _resolve_user_defined_macros(macros: Dict[str, Any], path: str = "user_defined_macros") -> Dict[str, Any]:
-        """
-        Recursively resolves user_defined_macros values. String values are imported
-        as callables via their dotted module path. Nested dicts are resolved recursively.
-        Other types are passed through as-is.
-        """
-        if not isinstance(macros, dict):
-            raise DagFactoryConfigException(
-                f"Invalid `{path}` config: expected a mapping/dict, got {type(macros).__name__}."
-            )
-
-        resolved: Dict[str, Any] = {}
-        for key, value in macros.items():
-            if isinstance(value, str):
-                resolved[key] = import_string(value)
-            elif isinstance(value, dict):
-                resolved[key] = DagBuilder._resolve_user_defined_macros(value, path=f"{path}.{key}")
-            else:
-                resolved[key] = value
-        return resolved
+        """Deprecated shim. Use :func:`dagfactory.utils.resolve_user_defined_macros`."""
+        return utils.resolve_user_defined_macros(macros, path=path)
 
     @staticmethod
     def _handle_http_sensor(operator_obj, task_params):
@@ -878,7 +822,7 @@ class DagBuilder:
     @staticmethod
     def _build_dag_kwargs(dag_params: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Builds the kwargs dict passed to the DAG constructor by iterating over _DAG_PARAM_SPEC.
+        Builds the kwargs dict passed to the DAG constructor by iterating over DAG_PARAMS.
 
         Only parameters explicitly present in dag_params are included; absent parameters are
         left to Airflow's own defaults. Version-gated parameters are skipped silently when the
@@ -887,47 +831,25 @@ class DagBuilder:
         """
         dag_kwargs: Dict[str, Any] = {}
 
-        for spec in _DAG_PARAM_SPEC:
-            key: str = spec["key"]
-            param_present: bool = key in dag_params
-
-            if spec.get("required") and not param_present:
-                raise DagFactoryConfigException(f"Required DAG parameter '{key}' is missing.")
-
-            if not param_present:
+        for param in DAG_PARAMS:
+            if param.key not in dag_params:
+                if param.required:
+                    raise DagFactoryConfigException(f"Required DAG parameter '{param.key}' is missing.")
                 continue
 
-            min_ver = spec.get("min_version")
-            max_ver = spec.get("max_version")
-
-            if min_ver and INSTALLED_AIRFLOW_VERSION < min_ver:
-                warnings.warn(
-                    f"DAG parameter '{key}' requires Airflow >= {min_ver} "
-                    f"(installed: {INSTALLED_AIRFLOW_VERSION}). The parameter will be ignored.",
-                    UserWarning,
-                )
+            unsupported_reason = param.unsupported_reason(INSTALLED_AIRFLOW_VERSION)
+            if unsupported_reason:
+                warnings.warn(unsupported_reason, UserWarning)
                 continue
 
-            if max_ver and INSTALLED_AIRFLOW_VERSION >= max_ver:
+            if param.deprecated_in_favor_of:
                 warnings.warn(
-                    f"DAG parameter '{key}' is not supported in Airflow >= {max_ver} "
-                    f"(installed: {INSTALLED_AIRFLOW_VERSION}). The parameter will be ignored.",
-                    UserWarning,
-                )
-                continue
-
-            deprecated_in_favor_of: str = spec.get("deprecated_in_favor_of", "")
-            transform = spec.get("transform")
-            value = dag_params[key]
-            value = transform(value) if transform else value
-            if deprecated_in_favor_of:
-                warnings.warn(
-                    f"'{key}' is deprecated. Please use '{deprecated_in_favor_of}' instead.",
+                    f"'{param.key}' is deprecated. Please use '{param.deprecated_in_favor_of}' instead.",
                     DeprecationWarning,
                 )
-                dag_kwargs[deprecated_in_favor_of] = value
-            else:
-                dag_kwargs[key] = value
+
+            value = dag_params[param.key]
+            dag_kwargs[param.target_key] = param.transform(value) if param.transform else value
 
         return dag_kwargs
 
@@ -948,13 +870,6 @@ class DagBuilder:
         dag_kwargs: Dict[str, Any] = DagBuilder._build_dag_kwargs(dag_params)
 
         DagBuilder.configure_schedule(dag_params, dag_kwargs)
-
-        # TODO: move _resolve_user_defined_macros to module level so it can be used as a
-        # transform in _DAG_PARAM_SPEC.
-        if dag_params.get("user_defined_macros"):
-            dag_kwargs["user_defined_macros"] = DagBuilder._resolve_user_defined_macros(
-                dag_params["user_defined_macros"]
-            )
 
         dag: DAG = DAG(**dag_kwargs)
 
