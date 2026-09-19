@@ -123,10 +123,18 @@ and the generator derives the `$defs` sections from that: a key is defined once
 and referenced from the other sections it belongs to.
 
 The cross-field rules are derived as well. `dependentRequired` comes from each
-entry's `requires`; `x-mutually-exclusive` from `exclusive_group`, plus every
-deprecated key paired with the key it defers to; `x-required-anywhere` from a
-`required_in_yaml` key that is valid in more than one scope. Only the wording of
-a named exclusive group is written by hand, in `EXCLUSIVE_GROUPS`.
+entry's `requires`; `x-mutually-exclusive` from `exclusive_group`;
+`x-required-anywhere` from a `required_in_yaml` key that is valid in more than
+one scope. Only the wording of a named exclusive group is written by hand, in
+`EXCLUSIVE_GROUPS`.
+
+Conflicting keys follow Airflow, which treats two cases differently, and the
+linter matches the builder in both. Mutually exclusive arguments are an error:
+Airflow 2's `DAG` raises for `schedule`/`schedule_interval`/`timetable`, and
+`check_exclusive_groups()` raises on the same groups the schema flags. A
+deprecated alias is not an error: Airflow 2 warns and assigns
+`max_active_tasks = concurrency`, so setting both is legal and the deprecated
+value wins. Lint reports it as a deprecation warning, not a conflict.
 
 After editing the registry, regenerate:
 
