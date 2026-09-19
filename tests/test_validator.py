@@ -1,4 +1,5 @@
 """Tests for dagfactory.validator: imports_dagfactory helper + DagParameterValidator."""
+
 import sys
 import textwrap
 from pathlib import Path
@@ -224,18 +225,14 @@ def test_schema_mode_config_dict_loader_ignores_sibling_defaults_yml(tmp_path):
     (loader_dir / "defaults.yml").write_text("tags: [from-sibling-loader-dir]\n")
 
     loader = loader_dir / "loader.py"
-    loader.write_text(
-        textwrap.dedent(
-            f"""
+    loader.write_text(textwrap.dedent(f"""
             from dagfactory import load_yaml_dags
             load_yaml_dags(
                 globals_dict=globals(),
                 config_dict={{"my_dag": {{"tasks": [{{"task_id": "t", "operator": "x"}}]}}}},
                 defaults_config_path={str(user_defaults_dir)!r},
             )
-            """
-        )
-    )
+            """))
 
     results = DagParameterValidator(airflow_version="3").validate_python_loader(loader)
     assert len(results) == 1
@@ -298,24 +295,45 @@ def test_validate_yaml_file_skips_non_dag_yaml(tmp_path):
     assert any("config-only" in i.message for i in results[0].warnings)
 
 
-def test_validate_yaml_file_missing_start_date_is_a_warning(tmp_path):
-    """validate_yaml_file never resolves the external defaults.yml chain, so a
-    DAG that gets `start_date` from there (a common pattern) shouldn't be a
-    hard error here — just a warning flagging the gap."""
+def test_validate_yaml_file_missing_start_date_is_an_error(tmp_path):
+    """With the defaults chain resolved, a genuinely absent start_date is an error.
+
+    This used to be softened to a warning because lint could not see
+    defaults.yml. It can now, so a missing value means missing everywhere.
+    """
     p = tmp_path / "dag.yml"
     p.write_text("my_dag:\n  tasks:\n    - task_id: t\n      operator: x\n")
-    results = DagParameterValidator(airflow_version="3").validate_yaml_file(p)
-    assert not results[0].errors
-    assert any("start_date" in w.message for w in results[0].warnings)
+    results = DagParameterValidator(airflow_version="3", defaults_config_path=str(tmp_path)).validate_yaml_file(p)
+    assert any("start_date" in e.message for e in results[0].errors)
 
 
-def test_validate_yaml_file_missing_tasks_is_a_warning(tmp_path):
-    """Same as above for a `tasks` list supplied only via external defaults."""
+def test_validate_yaml_file_start_date_from_defaults_is_accepted(tmp_path):
+    """The same DAG is clean once defaults.yml supplies start_date."""
+    (tmp_path / "defaults.yml").write_text('default_args:\n  start_date: "2024-01-01"\n')
+    p = tmp_path / "dag.yml"
+    p.write_text("my_dag:\n  tasks:\n    - task_id: t\n      operator: x\n")
+    results = DagParameterValidator(airflow_version="3", defaults_config_path=str(tmp_path)).validate_yaml_file(p)
+    assert not results[0].errors, [e.render() for e in results[0].errors]
+
+
+def test_validate_yaml_file_missing_tasks_is_an_error(tmp_path):
+    """Same for a `tasks` list that no defaults file supplies."""
     p = tmp_path / "dag.yml"
     p.write_text("my_dag:\n  default_args:\n    start_date: '2025-01-01'\n")
-    results = DagParameterValidator(airflow_version="3").validate_yaml_file(p)
+    results = DagParameterValidator(airflow_version="3", defaults_config_path=str(tmp_path)).validate_yaml_file(p)
+    assert any("tasks" in e.message for e in results[0].errors)
+
+
+def test_validate_yaml_content_still_softens_defaults_satisfiable_fields(tmp_path):
+    """Inline YAML has no location, so the defaults chain cannot be walked.
+
+    Those fields stay warnings there, which is why the softening still exists.
+    """
+    results = DagParameterValidator(airflow_version="3").validate_yaml_content(
+        "my_dag:\n  tasks:\n    - task_id: t\n      operator: x\n"
+    )
     assert not results[0].errors
-    assert any("tasks" in w.message for w in results[0].warnings)
+    assert any("start_date" in w.message for w in results[0].warnings)
 
 
 # ---------------------------------------------------------------------------

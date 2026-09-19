@@ -1,5 +1,7 @@
+import copy
 import datetime
 import functools
+import logging
 import os
 from datetime import timedelta
 from pathlib import Path
@@ -7,8 +9,7 @@ from unittest.mock import mock_open, patch
 
 import pendulum
 import pytest
-import logging
-import copy
+
 from dagfactory._yaml import load_yaml_file
 
 try:
@@ -19,6 +20,7 @@ except ImportError:
 import yaml
 from airflow.providers.common.sql.sensors.sql import SqlSensor
 from airflow.providers.http.sensors.http import HttpSensor
+
 try:
     from airflow.sdk.module_loading import import_string
 except ImportError:
@@ -856,11 +858,7 @@ def test_set_callback_with_list():
     assert result[0].keywords["param_2"] == "value_2"
 
     # --- list with a dict entry that has no extra kwargs (partial with no kwargs) ---
-    params = {
-        "on_failure_callback": [
-            {"callback": f"{__name__}.print_context_callback"}
-        ]
-    }
+    params = {"on_failure_callback": [{"callback": f"{__name__}.print_context_callback"}]}
     result = DagBuilder.set_callback(parameters=params, callback_type="on_failure_callback")
     assert isinstance(result, list)
     assert isinstance(result[0], functools.partial)
@@ -908,11 +906,7 @@ def test_set_callback_with_list():
     import unittest.mock as mock
 
     with mock.patch("dagfactory.dagbuilder.import_string", return_value=dummy_notifier_factory):
-        params = {
-            "on_failure_callback": [
-                {"callback": "my.dummy.notifier", "channel": "#alerts"}
-            ]
-        }
+        params = {"on_failure_callback": [{"callback": "my.dummy.notifier", "channel": "#alerts"}]}
         result = DagBuilder.set_callback(parameters=params, callback_type="on_failure_callback")
 
     assert isinstance(result, list)
@@ -1149,18 +1143,13 @@ def test_make_dag_with_task_group_callbacks_default_args():
     if version.parse(AIRFLOW_VERSION) >= version.parse("3.0.0"):
         assert isinstance(dag.task_dict["task_group_1.task_2"].on_failure_callback[0], functools.partial)
         assert callable(dag.task_dict["task_group_1.task_2"].on_failure_callback[0])
-        assert (
-            dag.task_dict["task_group_1.task_2"].on_failure_callback[0].func.__name__
-            == "empty_callback_with_params"
-        )
+        assert dag.task_dict["task_group_1.task_2"].on_failure_callback[0].func.__name__ == "empty_callback_with_params"
         assert "param_1" in dag.task_dict["task_group_1.task_2"].on_failure_callback[0].keywords
         assert dag.task_dict["task_group_1.task_2"].on_failure_callback[0].keywords.get("param_1") == "value_1"
     else:
         assert isinstance(dag.task_dict["task_group_1.task_2"].on_failure_callback, functools.partial)
         assert callable(dag.task_dict["task_group_1.task_2"].on_failure_callback)
-        assert (
-            dag.task_dict["task_group_1.task_2"].on_failure_callback.func.__name__ == "empty_callback_with_params"
-        )
+        assert dag.task_dict["task_group_1.task_2"].on_failure_callback.func.__name__ == "empty_callback_with_params"
         assert "param_1" in dag.task_dict["task_group_1.task_2"].on_failure_callback.keywords
         assert dag.task_dict["task_group_1.task_2"].on_failure_callback.keywords.get("param_1") == "value_1"
 
@@ -1438,8 +1427,20 @@ class TestSchedule:
         actual = schedule_data["schedule"]
         assert isinstance(actual, AssetAll)
         assert list(actual.objects) == [
-            Asset(name="s3://dag1/output_1.txt", uri="s3://dag1/output_1.txt", group="asset", extra={"hi": "bye"}, watchers=[]),
-            Asset(name="s3://dag2/output_1.txt", uri="s3://dag2/output_1.txt", group="asset", extra={"hi": "bye"}, watchers=[]),
+            Asset(
+                name="s3://dag1/output_1.txt",
+                uri="s3://dag1/output_1.txt",
+                group="asset",
+                extra={"hi": "bye"},
+                watchers=[],
+            ),
+            Asset(
+                name="s3://dag2/output_1.txt",
+                uri="s3://dag2/output_1.txt",
+                group="asset",
+                extra={"hi": "bye"},
+                watchers=[],
+            ),
         ]
 
     @pytest.mark.skipif(INSTALLED_AIRFLOW_VERSION.major < 3, reason="Requires Airflow >= 3.0.0")
@@ -1450,8 +1451,20 @@ class TestSchedule:
         actual = schedule_data["schedule"]
         assert isinstance(actual, AssetAny)
         assert list(actual.objects) == [
-            Asset(name="s3://dag1/output_1.txt", uri="s3://dag1/output_1.txt", group="asset", extra={"hi": "bye"}, watchers=[]),
-            Asset(name="s3://dag2/output_1.txt", uri="s3://dag2/output_1.txt", group="asset", extra={"hi": "bye"}, watchers=[]),
+            Asset(
+                name="s3://dag1/output_1.txt",
+                uri="s3://dag1/output_1.txt",
+                group="asset",
+                extra={"hi": "bye"},
+                watchers=[],
+            ),
+            Asset(
+                name="s3://dag2/output_1.txt",
+                uri="s3://dag2/output_1.txt",
+                group="asset",
+                extra={"hi": "bye"},
+                watchers=[],
+            ),
         ]
 
     @pytest.mark.skipif(INSTALLED_AIRFLOW_VERSION.major < 3, reason="Requires Airflow >= 3.0.0")
@@ -1463,8 +1476,20 @@ class TestSchedule:
         assert isinstance(actual, AssetAny)
         assert isinstance(actual.objects[0], AssetAll)
         assert list(actual.objects[0].objects) == [
-            Asset(name="s3://dag1/output_1.txt", uri="s3://dag1/output_1.txt", group="asset", extra={"hi": "bye"}, watchers=[]),
-            Asset(name="s3://dag2/output_1.txt", uri="s3://dag2/output_1.txt", group="asset", extra={"hi": "bye"}, watchers=[]),
+            Asset(
+                name="s3://dag1/output_1.txt",
+                uri="s3://dag1/output_1.txt",
+                group="asset",
+                extra={"hi": "bye"},
+                watchers=[],
+            ),
+            Asset(
+                name="s3://dag2/output_1.txt",
+                uri="s3://dag2/output_1.txt",
+                group="asset",
+                extra={"hi": "bye"},
+                watchers=[],
+            ),
         ]
         assert actual.objects[1] == Asset(
             name="s3://dag3/output_3.txt", uri="s3://dag3/output_3.txt", group="asset", extra={"hi": "bye"}, watchers=[]
@@ -1544,6 +1569,7 @@ class TestSchedule:
         assert isinstance(actual_timetable, CronTriggerTimetable)
         assert actual_timetable.serialize()["expression"] == "* * * * *"
         assert actual_timetable.serialize()["timezone"] == "UTC"
+
 
 # ===============================
 # Test ConfigureSchedule
@@ -1852,3 +1878,119 @@ class TestResolveUserDefinedMacros:
     def test_invalid_import_string_raises(self):
         with pytest.raises(Exception):
             DagBuilder._resolve_user_defined_macros({"bad": "nonexistent.module.func"})
+
+
+# ---------------------------------------------------------------------------
+# Schema-driven DAG kwargs
+# ---------------------------------------------------------------------------
+
+
+class TestBuildDagKwargs:
+    """_build_dag_kwargs takes its instructions from the JSON schema."""
+
+    def _call(self, dag_params):
+        return dagbuilder.DagBuilder._build_dag_kwargs(dag_params)
+
+    def test_only_keys_present_in_the_config_are_forwarded(self):
+        result = self._call({"dag_id": "d"})
+        assert result == {"dag_id": "d"}
+
+    def test_absent_keys_are_left_to_airflows_own_defaults(self):
+        """Nothing is back-filled from airflow.cfg, so Airflow decides."""
+        result = self._call({"dag_id": "d"})
+        for key in ("catchup", "max_active_runs", "max_active_tasks", "dagrun_timeout"):
+            assert key not in result
+
+    def test_ordinary_values_pass_through(self):
+        result = self._call({"dag_id": "d", "catchup": False, "max_active_runs": 3})
+        assert result["catchup"] is False
+        assert result["max_active_runs"] == 3
+
+    def test_dagfactory_only_keys_are_never_forwarded(self):
+        result = self._call({"dag_id": "d", "tasks": {"t": {}}, "task_groups": {}, "doc_md_file_path": "/a"})
+        assert set(result) == {"dag_id"}
+
+    def test_keys_handled_by_dagfactory_are_not_forwarded(self):
+        """configure_schedule and the tags assignment own these."""
+        result = self._call({"dag_id": "d", "schedule": "@daily", "tags": ["a"]})
+        assert set(result) == {"dag_id"}
+
+    def test_unknown_keys_are_ignored(self):
+        result = self._call({"dag_id": "d", "not_a_real_param": 1})
+        assert set(result) == {"dag_id"}
+
+    def test_deprecated_alias_maps_to_its_canonical_key(self):
+        with pytest.warns(DeprecationWarning, match="concurrency"):
+            result = self._call({"dag_id": "d", "concurrency": 5})
+        assert result["max_active_tasks"] == 5
+        assert "concurrency" not in result
+
+    def test_deprecated_alias_wins_over_the_canonical_key(self):
+        """Airflow 2 warns then assigns `max_active_tasks = concurrency`."""
+        with pytest.warns(DeprecationWarning, match="concurrency"):
+            result = self._call({"dag_id": "d", "concurrency": 5, "max_active_tasks": 7})
+        assert result["max_active_tasks"] == 5
+
+    def test_canonical_key_alone_raises_no_deprecation(self):
+        import warnings as _warnings
+
+        with _warnings.catch_warnings():
+            _warnings.simplefilter("error", DeprecationWarning)
+            result = self._call({"dag_id": "d", "max_active_tasks": 7})
+        assert result["max_active_tasks"] == 7
+
+    def test_transform_is_applied(self):
+        result = self._call({"dag_id": "d", "user_defined_macros": {"ds": "pendulum.now"}})
+        assert result["user_defined_macros"]["ds"] is pendulum.now
+
+    def test_version_gated_key_warns_and_is_dropped(self):
+        """Airflow 3 has no `timetable` kwarg; forwarding it would raise TypeError."""
+        with patch.object(dagbuilder, "INSTALLED_AIRFLOW_VERSION", version.parse("3.0.0")):
+            with pytest.warns(UserWarning, match="timetable"):
+                result = self._call({"dag_id": "d", "timetable": {"a": 1}})
+        assert "timetable" not in result
+
+    def test_version_gated_key_kept_when_the_version_allows_it(self):
+        with patch.object(dagbuilder, "INSTALLED_AIRFLOW_VERSION", version.parse("2.10.0")):
+            result = self._call({"dag_id": "d", "timetable": {"a": 1}})
+        assert result["timetable"] == {"a": 1}
+
+    def test_absent_gated_key_warns_about_nothing(self):
+        import warnings as _warnings
+
+        with patch.object(dagbuilder, "INSTALLED_AIRFLOW_VERSION", version.parse("3.0.0")):
+            with _warnings.catch_warnings():
+                _warnings.simplefilter("error", UserWarning)
+                self._call({"dag_id": "d"})
+
+    def test_param_not_wired_through_dagfactory_is_dropped(self):
+        with pytest.warns(UserWarning, match="fail_fast"):
+            result = self._call({"dag_id": "d", "fail_fast": True})
+        assert "fail_fast" not in result
+
+
+class TestValidateConfigOnBuild:
+    """build() runs the same schema the linter does."""
+
+    def test_clean_config_logs_nothing(self, caplog):
+        with caplog.at_level(logging.WARNING, logger="dagfactory"):
+            dagbuilder.DagBuilder.validate_config(
+                {"dag_id": "d", "start_date": datetime.datetime(2024, 1, 1), "tasks": {"t": {}}}
+            )
+        assert not [r for r in caplog.records if "config" in r.message]
+
+    def test_schema_error_is_logged(self, caplog):
+        with caplog.at_level(logging.WARNING, logger="dagfactory"):
+            dagbuilder.DagBuilder.validate_config({"dag_id": "d", "tasks": {"t": {}}})
+        assert any("start_date" in r.message for r in caplog.records)
+
+    def test_strict_mode_turns_errors_fatal(self):
+        with patch.object(dagbuilder.settings, "strict_mode", True):
+            with pytest.raises(dagbuilder.DagFactoryConfigException, match="schema validation"):
+                dagbuilder.DagBuilder.validate_config({"dag_id": "d", "tasks": {"t": {}}})
+
+    def test_validation_can_be_switched_off(self, caplog):
+        with patch.object(dagbuilder.settings, "validate_on_build", False):
+            with caplog.at_level(logging.WARNING, logger="dagfactory"):
+                dagbuilder.DagBuilder.validate_config({"dag_id": "d", "tasks": {"t": {}}})
+        assert not caplog.records

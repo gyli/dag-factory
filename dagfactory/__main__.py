@@ -76,9 +76,7 @@ def _find_lintable_files(path: Path, lint_yaml_in_dir: bool = False) -> list[Pat
 
     if path.suffix == ".py":
         if not imports_dagfactory(path):
-            console.print(
-                f"[yellow]'{path}' does not import dagfactory; skipping (not a loader file).[/yellow]"
-            )
+            console.print(f"[yellow]'{path}' does not import dagfactory; skipping (not a loader file).[/yellow]")
             raise typer.Exit()
         return [path]
 
@@ -86,8 +84,7 @@ def _find_lintable_files(path: Path, lint_yaml_in_dir: bool = False) -> list[Pat
         return [path]
 
     console.print(
-        f"[red]Error:[/red] lint operates on .py loader files or .yml/.yaml configs; "
-        f"got '{path.suffix}'."
+        f"[red]Error:[/red] lint operates on .py loader files or .yml/.yaml configs; " f"got '{path.suffix}'."
     )
     raise typer.Exit(1)
 
@@ -219,6 +216,14 @@ def lint(
         help="When the path argument is a directory, also lint .yml/.yaml files alongside .py "
         "loaders. No effect on single-file or --yaml-content invocations.",
     ),
+    defaults_path: Optional[Path] = typer.Option(
+        None,
+        "--defaults-path",
+        help=(
+            "Root directory to search for defaults.yml/defaults.yaml, as dag-factory does at "
+            "runtime. Defaults to Airflow's dags_folder."
+        ),
+    ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show full error messages"),
     ignore: Path = typer.Option(None, "--ignore", "-i", help="Files or directories to ignore"),
 ):
@@ -230,9 +235,7 @@ def lint(
     and works without every operator package installed.
     """
     if (path is None) == (yaml_content is None):
-        console.print(
-            "[red]Error:[/red] provide either a path argument or --yaml-content (not both)."
-        )
+        console.print("[red]Error:[/red] provide either a path argument or --yaml-content (not both).")
         raise typer.Exit(1)
 
     table = Table(
@@ -244,7 +247,11 @@ def lint(
     table.add_column("Error Message", style="red", no_wrap=False, overflow="fold")
 
     try:
-        validator = DagParameterValidator(airflow_version=airflow_version, schema_only=schema_only)
+        validator = DagParameterValidator(
+            airflow_version=airflow_version,
+            schema_only=schema_only,
+            defaults_config_path=str(defaults_path) if defaults_path else None,
+        )
     except ValueError as exc:
         console.print(f"[red]Error:[/red] {exc}")
         raise typer.Exit(2)
@@ -304,9 +311,7 @@ def lint(
             console.print("For more details on the errors, run with --verbose.")
         raise typer.Exit(1)
     if total_warnings:
-        console.print(
-            f"{summary}, [green]no errors[/green], [yellow]{total_warnings}[/yellow] warning(s)."
-        )
+        console.print(f"{summary}, [green]no errors[/green], [yellow]{total_warnings}[/yellow] warning(s).")
         return
     console.print(f"{summary}, [green]no errors found.[/green]")
 

@@ -39,8 +39,8 @@ Validate DAG parameters end-to-end. The lint command accepts three input modes a
 | Input                | Example                                                  | What is validated                                                                                                                                |
 | -------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Python loader (`.py`) | `dagfactory lint dags/loader.py`                         | The loader is imported and every `load_yaml_dags(...)` invocation is captured. dag-factory's own defaults handling (defaults.yml chain, `defaults_config_dict`, etc.) runs end-to-end. |
-| YAML file (`.yml`/`.yaml`) | `dagfactory lint dags/my_dag.yml`                  | Each top-level DAG entry is validated as a self-contained config. The file's own `default:` block is applied; no external defaults are merged. Since `start_date`/`tasks` are commonly supplied via an external `defaults.yml`, a DAG missing them here is reported as a warning, not an error. |
-| Inline YAML          | `dagfactory lint --yaml-content "$(cat my_dag.yml)"`     | Same semantics as a YAML file, supplied as a string. Useful for editor / IDE integration.                                                          |
+| YAML file (`.yml`/`.yaml`) | `dagfactory lint dags/my_dag.yml`                  | Each top-level DAG entry is validated as a self-contained config. The file's own `default:` block **and** the external `defaults.yml` chain are applied, by handing the file path to the same factory the runtime uses. Set the search root with `--defaults-path`; it defaults to Airflow's `dags_folder`. |
+| Inline YAML          | `dagfactory lint --yaml-content "$(cat my_dag.yml)"`     | Same semantics, supplied as a string. There is no file location to walk up from, so the external `defaults.yml` chain cannot be resolved; a DAG missing `start_date`/`tasks` is reported as a warning rather than an error. |
 
 When a directory is passed, the walker finds all `.py` files that import `dagfactory` and lints them. Files named `defaults.yml`/`defaults.yaml` are recognised as dag-factory infrastructure and skipped with a warning. Pass `--lint-yaml-in-dir` to also include `.yml`/`.yaml` files alongside the loaders, while this should be an uncommon case, as the .py files should cover all DAGs already. If a directory has YAML configs but no `.py` loaders and `--lint-yaml-in-dir` isn't passed, lint exits non-zero rather than silently checking nothing.
 
@@ -108,7 +108,57 @@ Settings → Languages & Frameworks → Schemas and DTDs → JSON Schema Mapping
 
 ### Notes on standalone use
 
-The standalone schema validates the static structure of a YAML file: required fields, value types, removed/deprecated parameters, and dag-factory-specific conventions. It does **not** apply external defaults (`defaults.yml`, `defaults_config_dict`) or run dag-factory's loader, so cross-file constraints and operator-import errors are only caught by `dagfactory lint`.
+The standalone schema validates the static structure of a YAML file: required fields, value types, removed/deprecated parameters, and dag-factory-specific conventions. Used directly by an editor it cannot apply external defaults or run dag-factory's loader, so cross-file constraints and operator-import errors are only caught by `dagfactory lint`.
+
+## One schema, two consumers
+
+`dagfactory/schemas/dag_parameters.json` is hand maintained and is the only
+description of the configuration dag-factory accepts. Both the linter and the
+DAG builder read it, so the rules cannot drift apart:
+
+- `dagfactory lint` reports its findings as errors and warnings.
+- `DagBuilder.build()` validates every resolved config against the same schema,
+  through the same code path, before constructing the DAG. It also decides from
+  the schema which keys reach the `DAG` constructor, which Airflow versions
+  accept them, and which are deprecated aliases.
+
+A parameter's Airflow version range is therefore stated once. `x-airflow-min-version`
+is read at the precision it is written (`"3"` means any Airflow 3, `"2.9"` means
+2.9 or later) and `x-airflow-max-version` is inclusive in the same way. Both the
+lint keywords and the builder call the same predicates in `dagfactory/schema.py`.
+
+The one thing the schema cannot express is Python. A few values need a callable
+applied before they reach Airflow; those live in `TRANSFORMS` in
+`dagfactory/schema.py`, keyed by the same property names, and a test asserts
+every key is a property the schema declares.
+
+### Validation while building
+
+Validation runs on each DAG's fully resolved config — after `defaults.yml` and
+the `default:` block are merged — and before the `DAG` object is created.
+Findings are logged: warnings as warnings, errors as errors. The DAG is still
+built, so a stale annotation cannot take a deployment down.
+
+Set `strict_mode` to make a schema error stop the build instead:
+
+```ini
+[dag_factory]
+strict_mode = True
+```
+
+To turn build-time validation off entirely:
+
+```ini
+[dag_factory]
+validate_on_build = False
+```
+
+A parameter the installed Airflow no longer accepts is dropped with a warning
+rather than passed through. That is a change in behaviour: previously
+`timetable` on Airflow 3 reached `DAG()` and raised
+`TypeError: DAG.__init__() got an unexpected keyword argument 'timetable'`,
+so the DAG did not appear at all. It now builds without the unsupported
+parameter. Use `strict_mode` if you would rather the DAG fail loudly.
 
 ## `convert`  command
 
