@@ -1870,12 +1870,19 @@ class TestBuildDagKwargs:
             result = self._call({"dag_id": "d", "max_active_tasks": 7})
         assert result["max_active_tasks"] == 7
 
-    def test_canonical_wins_when_both_deprecated_and_canonical_set(self):
-        # The concurrency entry comes first in PARAMS and writes max_active_tasks=5,
-        # then the max_active_tasks entry overwrites with the canonical value 7.
+    def test_deprecated_wins_when_both_deprecated_and_canonical_set(self):
+        # Airflow 2 warns and then assigns `max_active_tasks = concurrency`, so
+        # the deprecated value wins. Setting both is legal, not an error.
         with pytest.warns(DeprecationWarning, match="concurrency"):
             result = self._call({"dag_id": "d", "concurrency": 5, "max_active_tasks": 7})
-        assert result["max_active_tasks"] == 7
+        assert result["max_active_tasks"] == 5
+
+    def test_alias_precedence_does_not_depend_on_registry_order(self):
+        reversed_params = list(reversed(parameters.BUILD_PARAMS))
+        with patch.object(dagbuilder, "BUILD_PARAMS", reversed_params):
+            with pytest.warns(DeprecationWarning, match="concurrency"):
+                result = self._call({"dag_id": "d", "concurrency": 5, "max_active_tasks": 7})
+        assert result["max_active_tasks"] == 5
 
     # ------------------------------------------------------------------
     # min_version gating

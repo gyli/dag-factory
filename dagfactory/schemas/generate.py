@@ -108,31 +108,22 @@ def _join(fields: List[str]) -> str:
 
 
 def mutually_exclusive() -> List[Dict[str, Any]]:
-    """Derived from ``exclusive_group`` and from deprecated aliases.
+    """Derived from ``exclusive_group``, the same membership the builder raises on.
 
-    A deprecated key and the key it defers to are mutually exclusive by
-    definition, so that pairing needs no group.
+    Deprecated aliases are deliberately absent. Airflow allows ``concurrency``
+    and ``max_active_tasks`` together and lets the deprecated value win, so
+    flagging the pair as an error here would make the linter reject configs
+    that build correctly. ``x-deprecated-since`` already warns about the key.
     """
     groups: Dict[str, List[str]] = {}
     for param in PARAMS:
         if param.exclusive_group:
             groups.setdefault(param.exclusive_group, []).append(param.key)
 
-    rules = [
+    return [
         {"fields": fields, "message": EXCLUSIVE_GROUPS[name].format(fields=_join(fields))}
         for name, fields in groups.items()
     ]
-    rules += [
-        {
-            "fields": [param.key, param.deprecated_in_favor_of],
-            "message": (
-                f"`{param.key}` is a deprecated alias for " f"`{param.deprecated_in_favor_of}`; do not set both."
-            ),
-        }
-        for param in PARAMS
-        if param.deprecated_in_favor_of
-    ]
-    return rules
 
 
 #: How each scope reads in a sentence.

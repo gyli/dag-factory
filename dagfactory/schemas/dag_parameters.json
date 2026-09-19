@@ -625,13 +625,6 @@
         "timetable"
       ],
       "message": "Only one of `schedule`, `schedule_interval`, or `timetable` may be set."
-    },
-    {
-      "fields": [
-        "concurrency",
-        "max_active_tasks"
-      ],
-      "message": "`concurrency` is a deprecated alias for `max_active_tasks`; do not set both."
     }
   ],
   "x-required-anywhere": [

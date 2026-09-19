@@ -27,6 +27,16 @@ dag-factory rewrites it to ``max_active_tasks``, which Airflow 3 still accepts.
 **Support is derived, never declared.** ``x-dagfactory-supported: false`` in
 the generated schema comes from :attr:`Handling.IGNORED`, so a key cannot be
 wired up in the builder while the linter still calls it unsupported.
+
+**Conflicting keys follow Airflow**, which treats two cases differently.
+Genuinely mutually exclusive arguments raise: Airflow 2's ``DAG`` raises
+``ValueError("At most one allowed for args 'schedule_interval', 'timetable',
+and 'schedule'.")``, and Airflow 3's ``BaseSensorOperator`` raises for
+``soft_fail``/``never_fail``. :data:`EXCLUSIVE_GROUPS` does the same, with
+``DagFactoryConfigException``. A deprecated alias does not raise: Airflow 2
+warns and then assigns ``max_active_tasks = concurrency``, so setting both is
+legal and the deprecated value wins, which ``deprecated_in_favor_of``
+reproduces.
 """
 
 from __future__ import annotations
@@ -38,6 +48,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 from packaging.version import Version, parse as parse_version
 
+from dagfactory.exceptions import DagFactoryConfigException
 from dagfactory.utils import resolve_user_defined_macros
 
 #: Issue tracking the DAG arguments dag-factory does not yet forward.
@@ -90,8 +101,12 @@ class Param:
     :param max_version: lowest Airflow version no longer accepting it, exclusive.
     :param deprecated_since: Airflow version that deprecated the key.
     :param deprecated_in_favor_of: the canonical key that supersedes this one.
-        Entries carrying this must appear *before* the canonical entry in
-        :data:`PARAMS`, so the canonical value wins when both are set.
+        Setting both is allowed and the deprecated value wins, matching
+        Airflow, which warns and assigns ``max_active_tasks = concurrency``
+        rather than refusing the pair.
+    :param exclusive_group: name of an :data:`EXCLUSIVE_GROUPS` entry. Setting
+        more than one key of a group raises, matching Airflow's own handling
+        of mutually exclusive arguments. A deprecated alias is not a group.
     :param required: the builder needs this key present in the resolved config.
         Distinct from ``required_in_yaml``: ``dag_id`` is required here because
         ``_build_dag_kwargs`` cannot proceed without it, but dag-factory fills
@@ -101,9 +116,6 @@ class Param:
         them, which the schema expresses as ``x-required-anywhere``.
     :param requires: keys that must also be set whenever this one is; becomes
         ``dependentRequired``.
-    :param exclusive_group: name of an :data:`EXCLUSIVE_GROUPS` entry. Keys
-        sharing a group may not be set together. A deprecated key and the key
-        it defers to are mutually exclusive without needing a group.
     :param transform: applied to the raw YAML value before it reaches the
         ``DAG`` constructor.
     :param json_schema: JSON Schema fragment describing accepted values.
@@ -120,6 +132,7 @@ class Param:
     max_version: Optional[str] = None
     deprecated_since: Optional[str] = None
     deprecated_in_favor_of: Optional[str] = None
+    exclusive_group: Optional[str] = None
     required: bool = False
     required_in_yaml: bool = False
     requires: Tuple[str, ...] = ()
@@ -186,9 +199,9 @@ MAPPING_OR_LIST = {"$ref": "#/$defs/types/mapping_or_list"}
 TASK_LEVEL = Scope.TASK | Scope.DEFAULT_ARGS
 DAG_AND_DEFAULTS = Scope.DAG | Scope.DEFAULT_ARGS
 
-# Order matters twice over: a deprecated key must precede the key it defers to,
-# so the canonical value overwrites the deprecated one when a config sets both;
-# and the generated schema lists properties in this order.
+# Order sets the property order in the generated schema. It does not set alias
+# precedence: _build_dag_kwargs applies deprecated keys last so they win, as
+# Airflow does.
 PARAMS: List[Param] = [
     # ------------------------------------------------------------------
     # DAG-level, forwarded to DAG()
@@ -432,3 +445,22 @@ if len(PARAMS_BY_KEY) != len(PARAMS):
 
 #: The subset ``DagBuilder._build_dag_kwargs`` forwards to the DAG constructor.
 BUILD_PARAMS: List[Param] = [param for param in PARAMS if param.handling is Handling.KWARG]
+
+
+def check_exclusive_groups(config: Dict[str, Any]) -> None:
+    """Raise if a config sets more than one key of a mutually exclusive group.
+
+    Mirrors Airflow, which raises rather than silently picking a winner. Note
+    that a deprecated alias is deliberately *not* handled here: Airflow allows
+    ``concurrency`` and ``max_active_tasks`` together and lets the deprecated
+    one win, so that pairing warns instead of raising.
+    """
+    members: Dict[str, List[str]] = {}
+    for param in PARAMS:
+        if param.exclusive_group and param.key in config:
+            members.setdefault(param.exclusive_group, []).append(param.key)
+
+    for group, keys in members.items():
+        if len(keys) > 1:
+            listed = ", ".join(f"`{key}`" for key in keys)
+            raise DagFactoryConfigException(f"{EXCLUSIVE_GROUPS[group].format(fields=listed)} (set: {', '.join(keys)})")

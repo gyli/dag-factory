@@ -170,13 +170,34 @@ class TestDerivedCrossFieldRules:
         for keys in groups.values():
             assert tuple(sorted(keys)) in rules
 
-    def test_deprecated_aliases_are_exclusive_without_a_group(self, schema):
+    def test_deprecated_aliases_are_not_flagged_as_exclusive(self, schema):
+        """Airflow allows both, so the linter must not reject what the builder accepts."""
         pairs = {tuple(sorted(rule["fields"])) for rule in schema["x-mutually-exclusive"]}
         for param in PARAMS:
             if param.deprecated_in_favor_of:
-                assert tuple(sorted([param.key, param.deprecated_in_favor_of])) in pairs
-                # The pairing comes from deprecated_in_favor_of, not a group.
                 assert param.exclusive_group is None
+                assert tuple(sorted([param.key, param.deprecated_in_favor_of])) not in pairs
+
+    def test_lint_and_build_agree_on_every_exclusive_group(self, schema):
+        """Whatever the schema calls exclusive, check_exclusive_groups() raises on."""
+        from dagfactory.exceptions import DagFactoryConfigException
+        from dagfactory.parameters import check_exclusive_groups
+
+        for rule in schema["x-mutually-exclusive"]:
+            config = {field: "x" for field in rule["fields"]}
+            with pytest.raises(DagFactoryConfigException):
+                check_exclusive_groups(config)
+
+    def test_build_raises_for_nothing_the_schema_allows(self, schema):
+        """And the converse: the builder must not raise on a pair lint permits."""
+        from dagfactory.parameters import check_exclusive_groups
+
+        exclusive = {tuple(sorted(r["fields"])) for r in schema["x-mutually-exclusive"]}
+        for param in PARAMS:
+            if param.deprecated_in_favor_of:
+                pair = sorted([param.key, param.deprecated_in_favor_of])
+                assert tuple(pair) not in exclusive
+                check_exclusive_groups({key: "x" for key in pair})
 
     def test_dependent_required_comes_from_requires(self, schema):
         from dagfactory.parameters import Scope
