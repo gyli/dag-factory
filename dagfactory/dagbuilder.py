@@ -15,7 +15,7 @@ from typing import Any, Callable, Dict, List, Tuple, Union
 
 from packaging import version
 
-from dagfactory.parameters import DAG_PARAMS
+from dagfactory.parameters import PARAMS
 from dagfactory.utils import check_dict_key
 
 try:
@@ -822,7 +822,7 @@ class DagBuilder:
     @staticmethod
     def _build_dag_kwargs(dag_params: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Builds the kwargs dict passed to the DAG constructor by iterating over DAG_PARAMS.
+        Builds the kwargs dict passed to the DAG constructor by iterating over PARAMS.
 
         Only parameters explicitly present in dag_params are included; absent parameters are
         left to Airflow's own defaults. Version-gated parameters are skipped silently when the
@@ -831,7 +831,7 @@ class DagBuilder:
         """
         dag_kwargs: Dict[str, Any] = {}
 
-        for param in DAG_PARAMS:
+        for param in PARAMS:
             if param.key not in dag_params:
                 if param.required:
                     raise DagFactoryConfigException(f"Required DAG parameter '{param.key}' is missing.")

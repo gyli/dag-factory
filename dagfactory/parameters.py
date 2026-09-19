@@ -6,7 +6,7 @@ required, and how its raw YAML value is turned into a constructor argument.
 
 Two consumers read it:
 
-* ``dagfactory.dagbuilder`` iterates :data:`DAG_PARAMS` to decide which keys to
+* ``dagfactory.dagbuilder`` iterates :data:`PARAMS` to decide which keys to
   forward to the ``DAG`` constructor.
 * the JSON Schema used by ``dagfactory lint`` is generated from it, so the lint
   rules and the build behaviour cannot drift apart.
@@ -34,7 +34,7 @@ def _parse(bound: str) -> Version:
 
 
 @dataclass(frozen=True)
-class DagParam:
+class Param:
     """A DAG-level configuration key and everything dag-factory knows about it.
 
     :param key: the key as it appears in YAML, and the ``DAG`` constructor kwarg
@@ -43,7 +43,7 @@ class DagParam:
     :param max_version: lowest Airflow version that no longer accepts it, exclusive.
     :param deprecated_in_favor_of: the canonical key that supersedes this one.
         Entries carrying this must appear *before* the canonical entry in
-        :data:`DAG_PARAMS`, so that the canonical value wins when both are set.
+        :data:`PARAMS`, so that the canonical value wins when both are set.
     :param required: raise if the key is absent from the DAG config.
     :param transform: applied to the raw YAML value before it reaches the
         ``DAG`` constructor.
@@ -85,34 +85,36 @@ class DagParam:
 
 # Order matters: a deprecated key must precede the key it defers to, so that the
 # canonical value overwrites the deprecated one when a config sets both.
-DAG_PARAMS: List[DagParam] = [
-    DagParam("dag_id", required=True),
-    DagParam("dag_display_name"),
-    DagParam("description"),
-    DagParam("concurrency", deprecated_in_favor_of="max_active_tasks"),
-    DagParam("max_active_tasks"),
-    DagParam("catchup"),
-    DagParam("max_active_runs"),
-    DagParam("dagrun_timeout"),
-    DagParam("default_view", max_version="3.0.0"),
-    DagParam("orientation", max_version="3.0.0"),
-    DagParam("template_searchpath"),
-    DagParam("render_template_as_native_obj"),
-    DagParam("sla_miss_callback", max_version="3.1.0"),
-    DagParam("on_success_callback"),
-    DagParam("on_failure_callback"),
-    DagParam("default_args"),
-    DagParam("doc_md"),
-    DagParam("access_control"),
-    DagParam("is_paused_upon_creation"),
-    DagParam("params"),
-    DagParam("start_date"),
-    DagParam("end_date"),
-    DagParam("timetable"),
-    DagParam("user_defined_macros", transform=resolve_user_defined_macros),
+PARAMS: List[Param] = [
+    Param("dag_id", required=True),
+    Param("dag_display_name"),
+    Param("description"),
+    Param("concurrency", deprecated_in_favor_of="max_active_tasks"),
+    Param("max_active_tasks"),
+    Param("catchup"),
+    Param("max_active_runs"),
+    Param("dagrun_timeout"),
+    Param("default_view", max_version="3.0.0"),
+    Param("orientation", max_version="3.0.0"),
+    Param("template_searchpath"),
+    Param("render_template_as_native_obj"),
+    Param("sla_miss_callback", max_version="3.1.0"),
+    Param("on_success_callback"),
+    Param("on_failure_callback"),
+    Param("default_args"),
+    Param("doc_md"),
+    Param("access_control"),
+    Param("is_paused_upon_creation"),
+    Param("params"),
+    Param("start_date"),
+    Param("end_date"),
+    # Airflow 3 dropped the `timetable` kwarg; a Timetable instance goes via
+    # `schedule` instead. Forwarding it on Airflow 3 raises TypeError.
+    Param("timetable", max_version="3.0.0"),
+    Param("user_defined_macros", transform=resolve_user_defined_macros),
 ]
 
-DAG_PARAMS_BY_KEY: Dict[str, DagParam] = {param.key: param for param in DAG_PARAMS}
+PARAMS_BY_KEY: Dict[str, Param] = {param.key: param for param in PARAMS}
 
-if len(DAG_PARAMS_BY_KEY) != len(DAG_PARAMS):
-    raise RuntimeError("DAG_PARAMS contains duplicate keys")
+if len(PARAMS_BY_KEY) != len(PARAMS):
+    raise RuntimeError("PARAMS contains duplicate keys")
