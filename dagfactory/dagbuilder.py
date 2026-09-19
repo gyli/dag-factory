@@ -15,7 +15,7 @@ from typing import Any, Callable, Dict, List, Tuple, Union
 
 from packaging import version
 
-from dagfactory.parameters import PARAMS
+from dagfactory.parameters import BUILD_PARAMS, check_exclusive_groups
 from dagfactory.utils import check_dict_key
 
 try:
@@ -822,7 +822,7 @@ class DagBuilder:
     @staticmethod
     def _build_dag_kwargs(dag_params: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Builds the kwargs dict passed to the DAG constructor by iterating over PARAMS.
+        Builds the kwargs dict passed to the DAG constructor by iterating over BUILD_PARAMS.
 
         Only parameters explicitly present in dag_params are included; absent parameters are
         left to Airflow's own defaults. Version-gated parameters are skipped silently when the
@@ -831,25 +831,32 @@ class DagBuilder:
         """
         dag_kwargs: Dict[str, Any] = {}
 
-        for param in PARAMS:
-            if param.key not in dag_params:
-                if param.required:
-                    raise DagFactoryConfigException(f"Required DAG parameter '{param.key}' is missing.")
-                continue
+        # Two passes, so a deprecated alias wins over the key it defers to
+        # regardless of registry order. Airflow does the same: it warns, then
+        # assigns `max_active_tasks = concurrency`.
+        for deprecated_pass in (False, True):
+            for param in BUILD_PARAMS:
+                if bool(param.deprecated_in_favor_of) is not deprecated_pass:
+                    continue
 
-            unsupported_reason = param.unsupported_reason(INSTALLED_AIRFLOW_VERSION)
-            if unsupported_reason:
-                warnings.warn(unsupported_reason, UserWarning)
-                continue
+                if param.key not in dag_params:
+                    if param.required:
+                        raise DagFactoryConfigException(f"Required DAG parameter '{param.key}' is missing.")
+                    continue
 
-            if param.deprecated_in_favor_of:
-                warnings.warn(
-                    f"'{param.key}' is deprecated. Please use '{param.deprecated_in_favor_of}' instead.",
-                    DeprecationWarning,
-                )
+                unsupported_reason = param.unsupported_reason(INSTALLED_AIRFLOW_VERSION)
+                if unsupported_reason:
+                    warnings.warn(unsupported_reason, UserWarning)
+                    continue
 
-            value = dag_params[param.key]
-            dag_kwargs[param.target_key] = param.transform(value) if param.transform else value
+                if param.deprecated_in_favor_of:
+                    warnings.warn(
+                        f"'{param.key}' is deprecated. Please use '{param.deprecated_in_favor_of}' instead.",
+                        DeprecationWarning,
+                    )
+
+                value = dag_params[param.key]
+                dag_kwargs[param.target_key] = param.transform(value) if param.transform else value
 
         return dag_kwargs
 
@@ -866,6 +873,8 @@ class DagBuilder:
         dag_params["tasks"] = DagBuilder._normalise_tasks_config(dag_params.get("tasks"))
 
         dag_params["task_groups"] = DagBuilder._normalise_task_groups_config(dag_params.get("task_groups"))
+
+        check_exclusive_groups(dag_params)
 
         dag_kwargs: Dict[str, Any] = DagBuilder._build_dag_kwargs(dag_params)
 

@@ -81,7 +81,15 @@ class TestRegistry:
     def test_registry_is_the_only_definition_dagbuilder_reads(self):
         from dagfactory import dagbuilder
 
-        assert dagbuilder.PARAMS is parameters.PARAMS
+        assert dagbuilder.BUILD_PARAMS is parameters.BUILD_PARAMS
+
+    def test_build_params_excludes_keys_dagfactory_interprets_itself(self):
+        from dagfactory.parameters import BUILD_PARAMS, Handling
+
+        assert BUILD_PARAMS == [p for p in PARAMS if p.handling is Handling.KWARG]
+        forwarded = {p.key for p in BUILD_PARAMS}
+        for key in ("schedule", "schedule_interval", "doc_md_file_path", "doc_md_python_callable_file"):
+            assert key not in forwarded
 
 
 class TestVersionFacts:
@@ -89,3 +97,39 @@ class TestVersionFacts:
         # Airflow 3's DAG has no `timetable` kwarg, so forwarding it raises
         # TypeError rather than being ignored.
         assert PARAMS_BY_KEY["timetable"].max_version == "3.0.0"
+
+
+class TestExclusiveGroups:
+    """Airflow raises for mutually exclusive arguments; so do we."""
+
+    def test_every_group_is_declared_and_has_members(self):
+        from dagfactory.parameters import EXCLUSIVE_GROUPS
+
+        members = {}
+        for param in PARAMS:
+            if param.exclusive_group:
+                members.setdefault(param.exclusive_group, []).append(param.key)
+        assert set(members) == set(EXCLUSIVE_GROUPS)
+        for name, keys in members.items():
+            assert len(keys) > 1, f"exclusive group '{name}' has a single member"
+
+    def test_one_key_of_a_group_is_fine(self):
+        parameters.check_exclusive_groups({"dag_id": "d", "schedule": "@daily"})
+
+    def test_two_keys_of_a_group_raises(self):
+        from dagfactory.exceptions import DagFactoryConfigException
+
+        with pytest.raises(DagFactoryConfigException, match="Only one of"):
+            parameters.check_exclusive_groups({"schedule": "@daily", "timetable": {}})
+
+    def test_doc_md_sources_are_exclusive(self):
+        from dagfactory.exceptions import DagFactoryConfigException
+
+        with pytest.raises(DagFactoryConfigException, match="single source"):
+            parameters.check_exclusive_groups({"doc_md": "x", "doc_md_file_path": "/a"})
+
+    def test_a_deprecated_alias_is_not_an_exclusive_group(self):
+        # Airflow allows concurrency and max_active_tasks together, so this
+        # must not raise; _build_dag_kwargs warns and the deprecated one wins.
+        parameters.check_exclusive_groups({"concurrency": 5, "max_active_tasks": 7})
+        assert PARAMS_BY_KEY["concurrency"].exclusive_group is None
