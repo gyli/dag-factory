@@ -1884,23 +1884,23 @@ class TestBuildDagKwargs:
     def test_min_version_param_skipped_silently_when_absent(self):
         import warnings as _warnings
 
-        params = parameters.DAG_PARAMS + [parameters.DagParam("gated_key", min_version="2.9.0")]
-        with patch.object(dagbuilder, "DAG_PARAMS", params):
+        params = parameters.BUILD_PARAMS + [parameters.DagParam("gated_key", min_version="2.9.0")]
+        with patch.object(dagbuilder, "BUILD_PARAMS", params):
             with _warnings.catch_warnings():
                 _warnings.simplefilter("error")
                 result = self._call({"dag_id": "d"})
         assert "gated_key" not in result
 
     def test_min_version_param_included_when_version_satisfied(self):
-        params = parameters.DAG_PARAMS + [parameters.DagParam("gated_key", min_version="2.9.0")]
-        with patch.object(dagbuilder, "DAG_PARAMS", params):
+        params = parameters.BUILD_PARAMS + [parameters.DagParam("gated_key", min_version="2.9.0")]
+        with patch.object(dagbuilder, "BUILD_PARAMS", params):
             with patch.object(dagbuilder, "INSTALLED_AIRFLOW_VERSION", version.parse("2.9.0")):
                 result = self._call({"dag_id": "d", "gated_key": "hi"})
         assert result.get("gated_key") == "hi"
 
     def test_min_version_violation_emits_warning_and_ignores_param(self):
-        params = parameters.DAG_PARAMS + [parameters.DagParam("gated_key", min_version="2.9.0")]
-        with patch.object(dagbuilder, "DAG_PARAMS", params):
+        params = parameters.BUILD_PARAMS + [parameters.DagParam("gated_key", min_version="2.9.0")]
+        with patch.object(dagbuilder, "BUILD_PARAMS", params):
             with patch.object(dagbuilder, "INSTALLED_AIRFLOW_VERSION", version.parse("2.8.0")):
                 with pytest.warns(UserWarning, match="gated_key"):
                     result = self._call({"dag_id": "d", "gated_key": "hi"})
@@ -1954,8 +1954,8 @@ class TestBuildDagKwargs:
             transform_called_with.append(value)
             return value * 2
 
-        params = parameters.DAG_PARAMS + [parameters.DagParam("max_active_runs", transform=my_transform)]
-        with patch.object(dagbuilder, "DAG_PARAMS", params):
+        params = parameters.BUILD_PARAMS + [parameters.DagParam("max_active_runs", transform=my_transform)]
+        with patch.object(dagbuilder, "BUILD_PARAMS", params):
             result = self._call({"dag_id": "d", "max_active_runs": 3})
 
         assert transform_called_with == [3]

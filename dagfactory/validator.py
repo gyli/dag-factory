@@ -94,31 +94,24 @@ def _is_object_or_python_instance(checker, instance):
 
 
 def _x_airflow_min_version(validator, value, instance, schema):
+    """``x-airflow-min-version`` is the inclusive lower edge of the supported range."""
     actual = validator.airflow_version
-    bound = str(value).strip()
-    in_range = actual.major >= int(bound) if "." not in bound else actual >= Version(bound)
-    if not in_range:
+    if actual < Version(str(value).strip()):
         yield ValidationError(
-            f"was introduced in Airflow {value} and is not valid for the configured "
-            f"Airflow {actual}."
+            f"was introduced in Airflow {value} and is not valid for the configured Airflow {actual}."
         )
 
 
 def _x_airflow_max_version(validator, value, instance, schema):
+    """``x-airflow-max-version`` is the exclusive upper edge of the supported range.
+
+    Exclusive on purpose: the bound is the first release that dropped the
+    argument, so it reads the same however many components it is written with,
+    and matches DagParam.max_version in dagfactory.parameters.
+    """
     actual = validator.airflow_version
-    bound = str(value).strip()
-    bound_v = Version(bound)
-    if "." not in bound:
-        in_range = actual.major <= bound_v.major
-    elif bound_v.micro == 0 and bound.count(".") == 1:
-        in_range = (actual.major, actual.minor) <= (bound_v.major, bound_v.minor)
-    else:
-        in_range = actual <= bound_v
-    if not in_range:
-        yield ValidationError(
-            f"is not supported past Airflow {value} and was removed before the configured "
-            f"Airflow {actual}."
-        )
+    if actual >= Version(str(value).strip()):
+        yield ValidationError(f"was removed in Airflow {value} and is not valid for the configured Airflow {actual}.")
 
 
 def _x_deprecated_since(validator, value, instance, schema):
@@ -170,10 +163,8 @@ def _path_present(config: Dict[str, Any], dotted_path: str) -> bool:
 # We have to allow date and time type values as strings since dag-factory uses yaml.FullLoader,
 # which enriches the value types. If we want to avoid this, we will have to use a loader function
 # different from the one used by dag-factory, which might also not be ideal.
-_LINT_TYPE_CHECKER = (
-    Draft202012Validator.TYPE_CHECKER
-    .redefine("string", _is_string_or_date)
-    .redefine("object", _is_object_or_python_instance)
+_LINT_TYPE_CHECKER = Draft202012Validator.TYPE_CHECKER.redefine("string", _is_string_or_date).redefine(
+    "object", _is_object_or_python_instance
 )
 _LintValidatorClass = validators.extend(
     Draft202012Validator,
@@ -403,7 +394,9 @@ class DagParameterValidator:
             if exc is not None:
                 result.issues.append(
                     ValidationIssue(
-                        file=py_file_path, dag_id=None, severity="error",
+                        file=py_file_path,
+                        dag_id=None,
+                        severity="error",
                         message=f"Failed to build DAGs: {type(exc).__name__}: {exc}",
                     )
                 )
@@ -411,7 +404,9 @@ class DagParameterValidator:
             if not self._find_dag_objects(module):
                 result.issues.append(
                     ValidationIssue(
-                        file=py_file_path, dag_id=None, severity="warning",
+                        file=py_file_path,
+                        dag_id=None,
+                        severity="warning",
                         message="Loader imported successfully but no DAGs were built.",
                     )
                 )
@@ -422,15 +417,21 @@ class DagParameterValidator:
         with _intercept_dag_factory() as factories:
             _, exc = _import_loader(py_file_path)
         if exc is not None:
-            return [_make_result(
-                py_file_path, "error",
-                f"Failed to import {py_file_path.name}: {type(exc).__name__}: {exc}",
-            )]
+            return [
+                _make_result(
+                    py_file_path,
+                    "error",
+                    f"Failed to import {py_file_path.name}: {type(exc).__name__}: {exc}",
+                )
+            ]
         if not factories:
-            return [_make_result(
-                py_file_path, "warning",
-                "No dagfactory loader was invoked when importing this file.",
-            )]
+            return [
+                _make_result(
+                    py_file_path,
+                    "warning",
+                    "No dagfactory loader was invoked when importing this file.",
+                )
+            ]
 
         results: List[FileValidationResult] = []
         for factory in factories:
@@ -445,7 +446,9 @@ class DagParameterValidator:
                 except Exception as exc:
                     result.issues.append(
                         ValidationIssue(
-                            file=target, dag_id=None, severity="error",
+                            file=target,
+                            dag_id=None,
+                            severity="error",
                             message=f"dag-factory failed to build DAGs: {type(exc).__name__}: {exc}",
                         )
                     )
@@ -454,7 +457,9 @@ class DagParameterValidator:
                         dag_name, exc = first_build_error
                         result.issues.append(
                             ValidationIssue(
-                                file=target, dag_id=dag_name, severity="error",
+                                file=target,
+                                dag_id=dag_name,
+                                severity="error",
                                 message=f"dag-factory failed to build DAG: {type(exc).__name__}: {exc}",
                             )
                         )
@@ -474,17 +479,23 @@ class DagParameterValidator:
         """
         yaml_file_path = yaml_file_path.resolve()
         if yaml_file_path.name in DEFAULTS_FILE_NAMES:
-            return [_make_result(
-                yaml_file_path, "warning",
-                f"Skipping {yaml_file_path.name} — defaults file, not a DAG config.",
-            )]
+            return [
+                _make_result(
+                    yaml_file_path,
+                    "warning",
+                    f"Skipping {yaml_file_path.name} — defaults file, not a DAG config.",
+                )
+            ]
         try:
             config = load_yaml_file(str(yaml_file_path))
         except Exception as exc:
-            return [_make_result(
-                yaml_file_path, "error",
-                f"Failed to load YAML: {type(exc).__name__}: {exc}",
-            )]
+            return [
+                _make_result(
+                    yaml_file_path,
+                    "error",
+                    f"Failed to load YAML: {type(exc).__name__}: {exc}",
+                )
+            ]
         return [self._validate_yaml_config(config, yaml_file_path)]
 
     def validate_yaml_content(
@@ -500,10 +511,13 @@ class DagParameterValidator:
         try:
             config = load_yaml_string(yaml_content)
         except Exception as exc:
-            return [_make_result(
-                source, "error",
-                f"Failed to parse YAML: {type(exc).__name__}: {exc}",
-            )]
+            return [
+                _make_result(
+                    source,
+                    "error",
+                    f"Failed to parse YAML: {type(exc).__name__}: {exc}",
+                )
+            ]
         return [self._validate_yaml_config(config, source)]
 
     # ------------------------------------------------------------------
@@ -514,43 +528,63 @@ class DagParameterValidator:
         result = FileValidationResult(file=source)
 
         if not isinstance(config, dict):
-            result.issues.append(ValidationIssue(
-                file=source, dag_id=None, severity="error",
-                message="Top-level YAML must be a mapping.",
-            ))
+            result.issues.append(
+                ValidationIssue(
+                    file=source,
+                    dag_id=None,
+                    severity="error",
+                    message="Top-level YAML must be a mapping.",
+                )
+            )
             return result
 
         dag_entries = {k: v for k, v in config.items() if k not in SYSTEM_PARAMS}
         if not dag_entries:
-            result.issues.append(ValidationIssue(
-                file=source, dag_id=None, severity="warning",
-                message="No DAG entries found in YAML (only reserved top-level keys found).",
-            ))
+            result.issues.append(
+                ValidationIssue(
+                    file=source,
+                    dag_id=None,
+                    severity="warning",
+                    message="No DAG entries found in YAML (only reserved top-level keys found).",
+                )
+            )
             return result
         # Non-DAG YAML (top-level values aren't mappings) — skip with one warning.
         if not any(isinstance(v, dict) for v in dag_entries.values()):
-            result.issues.append(ValidationIssue(
-                file=source, dag_id=None, severity="warning",
-                message="No DAG entries found (top-level values are not mappings); "
-                "looks like a config-only YAML, skipping.",
-            ))
+            result.issues.append(
+                ValidationIssue(
+                    file=source,
+                    dag_id=None,
+                    severity="warning",
+                    message="No DAG entries found (top-level values are not mappings); "
+                    "looks like a config-only YAML, skipping.",
+                )
+            )
             return result
 
         if not self.schema_only:
             try:
                 _, first_build_error = _DagFactory(config_dict=config).build_dags()
             except Exception as exc:
-                result.issues.append(ValidationIssue(
-                    file=source, dag_id=None, severity="error",
-                    message=f"Failed to build DAGs: {type(exc).__name__}: {exc}",
-                ))
+                result.issues.append(
+                    ValidationIssue(
+                        file=source,
+                        dag_id=None,
+                        severity="error",
+                        message=f"Failed to build DAGs: {type(exc).__name__}: {exc}",
+                    )
+                )
                 return result
             if first_build_error is not None:
                 dag_name, exc = first_build_error
-                result.issues.append(ValidationIssue(
-                    file=source, dag_id=dag_name, severity="error",
-                    message=f"Failed to build DAG: {type(exc).__name__}: {exc}",
-                ))
+                result.issues.append(
+                    ValidationIssue(
+                        file=source,
+                        dag_id=dag_name,
+                        severity="error",
+                        message=f"Failed to build DAG: {type(exc).__name__}: {exc}",
+                    )
+                )
             return result
 
         # Schema mode: build via lint factory under DagBuilder intercept,
@@ -559,10 +593,14 @@ class DagParameterValidator:
             try:
                 _LintDagFactory(config_dict=config).build_dags()
             except Exception as exc:
-                result.issues.append(ValidationIssue(
-                    file=source, dag_id=None, severity="error",
-                    message=f"dag-factory failed to process YAML: {type(exc).__name__}: {exc}",
-                ))
+                result.issues.append(
+                    ValidationIssue(
+                        file=source,
+                        dag_id=None,
+                        severity="error",
+                        message=f"dag-factory failed to process YAML: {type(exc).__name__}: {exc}",
+                    )
+                )
         for builder in builders:
             merged = merge_configs(builder.dag_config, builder.default_config)
             # This entry point never resolves the external defaults.yml chain
@@ -602,7 +640,10 @@ class DagParameterValidator:
                 severity = "warning"
             result.issues.append(
                 ValidationIssue(
-                    file=file_path, dag_id=dag_id, severity=severity, message=error.message,
+                    file=file_path,
+                    dag_id=dag_id,
+                    severity=severity,
+                    message=error.message,
                     path=".".join(str(p) for p in error.absolute_path),
                 )
             )

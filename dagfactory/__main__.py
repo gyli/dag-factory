@@ -76,9 +76,7 @@ def _find_lintable_files(path: Path, lint_yaml_in_dir: bool = False) -> list[Pat
 
     if path.suffix == ".py":
         if not imports_dagfactory(path):
-            console.print(
-                f"[yellow]'{path}' does not import dagfactory; skipping (not a loader file).[/yellow]"
-            )
+            console.print(f"[yellow]'{path}' does not import dagfactory; skipping (not a loader file).[/yellow]")
             raise typer.Exit()
         return [path]
 
@@ -86,8 +84,7 @@ def _find_lintable_files(path: Path, lint_yaml_in_dir: bool = False) -> list[Pat
         return [path]
 
     console.print(
-        f"[red]Error:[/red] lint operates on .py loader files or .yml/.yaml configs; "
-        f"got '{path.suffix}'."
+        f"[red]Error:[/red] lint operates on .py loader files or .yml/.yaml configs; " f"got '{path.suffix}'."
     )
     raise typer.Exit(1)
 
@@ -230,9 +227,7 @@ def lint(
     and works without every operator package installed.
     """
     if (path is None) == (yaml_content is None):
-        console.print(
-            "[red]Error:[/red] provide either a path argument or --yaml-content (not both)."
-        )
+        console.print("[red]Error:[/red] provide either a path argument or --yaml-content (not both).")
         raise typer.Exit(1)
 
     table = Table(
@@ -304,9 +299,7 @@ def lint(
             console.print("For more details on the errors, run with --verbose.")
         raise typer.Exit(1)
     if total_warnings:
-        console.print(
-            f"{summary}, [green]no errors[/green], [yellow]{total_warnings}[/yellow] warning(s)."
-        )
+        console.print(f"{summary}, [green]no errors[/green], [yellow]{total_warnings}[/yellow] warning(s).")
         return
     console.print(f"{summary}, [green]no errors found.[/green]")
 

@@ -31,8 +31,7 @@ def _wide_console():
 def tmp_valid_loader(tmp_path):
     """Write a tiny .py loader that registers a clean inline DAG via load_yaml_dags."""
     file_path = tmp_path / "valid_loader.py"
-    file_path.write_text(
-        """
+    file_path.write_text("""
 from dagfactory import load_yaml_dags
 
 load_yaml_dags(
@@ -44,8 +43,7 @@ load_yaml_dags(
     },
     defaults_config_dict={"default_args": {"start_date": "2025-01-01", "owner": "test"}},
 )
-"""
-    )
+""")
     return file_path
 
 
@@ -53,8 +51,7 @@ load_yaml_dags(
 def tmp_invalid_loader(tmp_path):
     """Write a .py loader whose inline DAG uses a removed-in-AF3 parameter."""
     file_path = tmp_path / "invalid_loader.py"
-    file_path.write_text(
-        """
+    file_path.write_text("""
 from dagfactory import load_yaml_dags
 
 load_yaml_dags(
@@ -67,8 +64,7 @@ load_yaml_dags(
     },
     defaults_config_dict={"default_args": {"start_date": "2025-01-01"}},
 )
-"""
-    )
+""")
     return file_path
 
 
@@ -348,7 +344,14 @@ def test_lint_exclude_multiple_files(tmp_yaml_file, tmp_path):
     ignore_second_yaml.write_text("key: value\n")
     result = runner.invoke(
         app,
-        ["lint", str(tmp_path), "--ignore", f"{ignore_first_yaml},{ignore_second_yaml}", "--schema-only", "--lint-yaml-in-dir"],
+        [
+            "lint",
+            str(tmp_path),
+            "--ignore",
+            f"{ignore_first_yaml},{ignore_second_yaml}",
+            "--schema-only",
+            "--lint-yaml-in-dir",
+        ],
     )
     assert result.exit_code == 0
     assert "Ignored 2 YAML files" in result.stdout
@@ -469,5 +472,3 @@ def test_convert_invalid_yaml(tmpdir):
     assert result.exit_code == 1
     assert cmp(original_file, converted_file, shallow=False)
     assert "Failed to convert" in result.stdout
-
-

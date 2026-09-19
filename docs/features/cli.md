@@ -110,6 +110,27 @@ Settings → Languages & Frameworks → Schemas and DTDs → JSON Schema Mapping
 
 The standalone schema validates the static structure of a YAML file: required fields, value types, removed/deprecated parameters, and dag-factory-specific conventions. It does **not** apply external defaults (`defaults.yml`, `defaults_config_dict`) or run dag-factory's loader, so cross-file constraints and operator-import errors are only caught by `dagfactory lint`.
 
+### Where the schema comes from
+
+`dag_parameters.json` is generated, not hand written. The DAG-level properties
+come from `dagfactory/parameters.py`, the same registry `DagBuilder` reads when
+it decides which keys to pass to the `DAG` constructor, so a version bound or a
+deprecation is stated once and both the linter and the builder honour it. The
+reusable type definitions, task and `default_args` properties, and cross-field
+rules are hand maintained in `dagfactory/schemas/_chassis.json`.
+
+After editing either file, regenerate:
+
+```bash
+python -m dagfactory.schemas.generate
+```
+
+`tests/test_schema_generation.py` fails if the committed schema is out of date.
+
+The `x-airflow-min-version` annotation is the inclusive lower edge of the
+supported range and `x-airflow-max-version` the exclusive upper edge: a bound
+of `3.0.0` means the argument is gone as of Airflow 3.0.0.
+
 ## `convert`  command
 
 Given a path to either a directory containing YAML files or to a path to a single YAML file, tries to convert them from Airflow 2 to 3. By default, displays the necessary changes in the terminal (default). If using the flag `--override`, changes the original files with the necessary changes.

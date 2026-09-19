@@ -1,4 +1,5 @@
 """Tests for dagfactory.validator: imports_dagfactory helper + DagParameterValidator."""
+
 import sys
 import textwrap
 from pathlib import Path
@@ -201,7 +202,7 @@ def test_schema_mode_catches_removed_field_on_af3(tmp_path):
     results = DagParameterValidator(schema_only=True, airflow_version="3.1").validate_python_loader(p)
     rendered = " ".join(i.render() for i in results[0].errors)
     assert "schedule_interval" in rendered
-    assert "not supported past Airflow 2" in rendered
+    assert "was removed in Airflow 3.0.0" in rendered
 
 
 def test_schema_mode_config_dict_loader_ignores_sibling_defaults_yml(tmp_path):
@@ -224,18 +225,14 @@ def test_schema_mode_config_dict_loader_ignores_sibling_defaults_yml(tmp_path):
     (loader_dir / "defaults.yml").write_text("tags: [from-sibling-loader-dir]\n")
 
     loader = loader_dir / "loader.py"
-    loader.write_text(
-        textwrap.dedent(
-            f"""
+    loader.write_text(textwrap.dedent(f"""
             from dagfactory import load_yaml_dags
             load_yaml_dags(
                 globals_dict=globals(),
                 config_dict={{"my_dag": {{"tasks": [{{"task_id": "t", "operator": "x"}}]}}}},
                 defaults_config_path={str(user_defaults_dir)!r},
             )
-            """
-        )
-    )
+            """))
 
     results = DagParameterValidator(airflow_version="3").validate_python_loader(loader)
     assert len(results) == 1
