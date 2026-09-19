@@ -83,10 +83,45 @@ class TestRegistry:
 
         assert dagbuilder.BUILD_PARAMS is parameters.BUILD_PARAMS
 
-    def test_build_params_excludes_keys_dagfactory_interprets_itself(self):
+
+class TestHandling:
+    def test_build_params_are_exactly_the_kwarg_entries(self):
         from dagfactory.parameters import BUILD_PARAMS, Handling
 
         assert BUILD_PARAMS == [p for p in PARAMS if p.handling is Handling.KWARG]
+
+    def test_default_handling_is_kwarg(self):
+        from dagfactory.parameters import Handling
+
+        assert Param("x").handling is Handling.KWARG
+
+    def test_custom_and_ignored_keys_are_not_forwarded(self):
+        from dagfactory.parameters import BUILD_PARAMS, Handling
+
+        forwarded = {p.key for p in BUILD_PARAMS}
+        for param in PARAMS:
+            if param.handling is not Handling.KWARG:
+                assert param.key not in forwarded
+
+    def test_schedule_is_handled_outside_build_dag_kwargs(self):
+        from dagfactory.parameters import Handling
+
+        # configure_schedule() owns these, so _build_dag_kwargs must not touch them.
+        assert PARAMS_BY_KEY["schedule"].handling is Handling.CUSTOM
+        assert PARAMS_BY_KEY["schedule_interval"].handling is Handling.CUSTOM
+
+    def test_user_defined_macros_is_supported(self):
+        from dagfactory.parameters import Handling
+
+        # Support landed in main after #732 wrote the schema by hand; deriving
+        # the annotation from `handling` is what keeps the two in step.
+        param = PARAMS_BY_KEY["user_defined_macros"]
+        assert param.handling is Handling.KWARG
+        assert param.transform is not None
+
+    def test_keys_dagfactory_interprets_itself_are_not_forwarded(self):
+        from dagfactory.parameters import BUILD_PARAMS
+
         forwarded = {p.key for p in BUILD_PARAMS}
         for key in ("schedule", "schedule_interval", "doc_md_file_path", "doc_md_python_callable_file"):
             assert key not in forwarded
@@ -94,9 +129,18 @@ class TestRegistry:
 
 class TestVersionFacts:
     def test_timetable_is_bounded_to_airflow_2(self):
-        # Airflow 3's DAG has no `timetable` kwarg, so forwarding it raises
-        # TypeError rather than being ignored.
+        # Airflow 3's DAG has no `timetable` kwarg; forwarding it raises TypeError.
         assert PARAMS_BY_KEY["timetable"].max_version == "3.0.0"
+
+    def test_deprecated_alias_is_not_bounded_by_the_kwarg_it_replaces(self):
+        # `concurrency` is rewritten to max_active_tasks, which Airflow 3 still takes.
+        concurrency = PARAMS_BY_KEY["concurrency"]
+        assert concurrency.max_version is None
+        assert concurrency.target_key == "max_active_tasks"
+
+    def test_deprecated_since_must_parse(self):
+        with pytest.raises(Exception):
+            Param("x", deprecated_since="whenever")
 
 
 class TestExclusiveGroups:
