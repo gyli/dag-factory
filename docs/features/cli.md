@@ -112,14 +112,17 @@ The standalone schema validates the static structure of a YAML file: required fi
 
 ### Where the schema comes from
 
-`dag_parameters.json` is generated, not hand written. The DAG-level properties
-come from `dagfactory/parameters.py`, the same registry `DagBuilder` reads when
-it decides which keys to pass to the `DAG` constructor, so a version bound or a
-deprecation is stated once and both the linter and the builder honour it. The
-reusable type definitions, task and `default_args` properties, and cross-field
-rules are hand maintained in `dagfactory/schemas/_chassis.json`.
+`dag_parameters.json` is generated, not hand written. Every property in it comes
+from `dagfactory/parameters.py`, the same registry `DagBuilder` reads when it
+decides which keys to pass to the `DAG` constructor, so a version bound, a
+deprecation or a type is stated once and both the linter and the builder honour
+it. There is no hand-maintained JSON.
 
-After editing either file, regenerate:
+Each entry declares the scopes it is valid in (`DAG`, `TASK`, `DEFAULT_ARGS`),
+and the generator derives the `$defs` sections from that: a key is defined once
+and referenced from the other sections it belongs to.
+
+After editing the registry, regenerate:
 
 ```bash
 python -m dagfactory.schemas.generate

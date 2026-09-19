@@ -107,7 +107,7 @@ def _x_airflow_max_version(validator, value, instance, schema):
 
     Exclusive on purpose: the bound is the first release that dropped the
     argument, so it reads the same however many components it is written with,
-    and matches DagParam.max_version in dagfactory.parameters.
+    and matches Param.max_version in dagfactory.parameters.
     """
     actual = validator.airflow_version
     if actual >= Version(str(value).strip()):

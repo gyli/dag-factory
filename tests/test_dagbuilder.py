@@ -1871,7 +1871,7 @@ class TestBuildDagKwargs:
         assert result["max_active_tasks"] == 7
 
     def test_canonical_wins_when_both_deprecated_and_canonical_set(self):
-        # The concurrency entry comes first in DAG_PARAMS and writes max_active_tasks=5,
+        # The concurrency entry comes first in PARAMS and writes max_active_tasks=5,
         # then the max_active_tasks entry overwrites with the canonical value 7.
         with pytest.warns(DeprecationWarning, match="concurrency"):
             result = self._call({"dag_id": "d", "concurrency": 5, "max_active_tasks": 7})
@@ -1884,7 +1884,7 @@ class TestBuildDagKwargs:
     def test_min_version_param_skipped_silently_when_absent(self):
         import warnings as _warnings
 
-        params = parameters.BUILD_PARAMS + [parameters.DagParam("gated_key", min_version="2.9.0")]
+        params = parameters.BUILD_PARAMS + [parameters.Param("gated_key", min_version="2.9.0")]
         with patch.object(dagbuilder, "BUILD_PARAMS", params):
             with _warnings.catch_warnings():
                 _warnings.simplefilter("error")
@@ -1892,14 +1892,14 @@ class TestBuildDagKwargs:
         assert "gated_key" not in result
 
     def test_min_version_param_included_when_version_satisfied(self):
-        params = parameters.BUILD_PARAMS + [parameters.DagParam("gated_key", min_version="2.9.0")]
+        params = parameters.BUILD_PARAMS + [parameters.Param("gated_key", min_version="2.9.0")]
         with patch.object(dagbuilder, "BUILD_PARAMS", params):
             with patch.object(dagbuilder, "INSTALLED_AIRFLOW_VERSION", version.parse("2.9.0")):
                 result = self._call({"dag_id": "d", "gated_key": "hi"})
         assert result.get("gated_key") == "hi"
 
     def test_min_version_violation_emits_warning_and_ignores_param(self):
-        params = parameters.BUILD_PARAMS + [parameters.DagParam("gated_key", min_version="2.9.0")]
+        params = parameters.BUILD_PARAMS + [parameters.Param("gated_key", min_version="2.9.0")]
         with patch.object(dagbuilder, "BUILD_PARAMS", params):
             with patch.object(dagbuilder, "INSTALLED_AIRFLOW_VERSION", version.parse("2.8.0")):
                 with pytest.warns(UserWarning, match="gated_key"):
@@ -1954,7 +1954,7 @@ class TestBuildDagKwargs:
             transform_called_with.append(value)
             return value * 2
 
-        params = parameters.BUILD_PARAMS + [parameters.DagParam("max_active_runs", transform=my_transform)]
+        params = parameters.BUILD_PARAMS + [parameters.Param("max_active_runs", transform=my_transform)]
         with patch.object(dagbuilder, "BUILD_PARAMS", params):
             result = self._call({"dag_id": "d", "max_active_runs": 3})
 

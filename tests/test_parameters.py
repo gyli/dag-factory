@@ -4,58 +4,58 @@ import pytest
 from packaging.version import parse as parse_version
 
 from dagfactory import parameters
-from dagfactory.parameters import DAG_PARAMS, DAG_PARAMS_BY_KEY, DagParam
+from dagfactory.parameters import PARAMS, PARAMS_BY_KEY, Param
 
 
-class TestDagParam:
+class TestParam:
     def test_target_key_defaults_to_key(self):
-        assert DagParam("catchup").target_key == "catchup"
+        assert Param("catchup").target_key == "catchup"
 
     def test_target_key_follows_deprecation(self):
-        assert DagParam("concurrency", deprecated_in_favor_of="max_active_tasks").target_key == "max_active_tasks"
+        assert Param("concurrency", deprecated_in_favor_of="max_active_tasks").target_key == "max_active_tasks"
 
     def test_unbounded_param_applies_to_any_version(self):
-        param = DagParam("catchup")
+        param = Param("catchup")
         for release in ("2.9.0", "3.0.0", "99.0.0"):
             assert param.unsupported_reason(parse_version(release)) is None
 
     def test_min_version_is_inclusive(self):
-        param = DagParam("x", min_version="2.9.0")
+        param = Param("x", min_version="2.9.0")
         assert param.unsupported_reason(parse_version("2.9.0")) is None
         assert param.unsupported_reason(parse_version("2.8.9")) is not None
 
     def test_max_version_is_exclusive(self):
-        param = DagParam("x", max_version="3.0.0")
+        param = Param("x", max_version="3.0.0")
         assert param.unsupported_reason(parse_version("2.10.5")) is None
         assert param.unsupported_reason(parse_version("3.0.0")) is not None
 
     def test_reason_names_the_key_and_both_versions(self):
-        reason = DagParam("orientation", max_version="3.0.0").unsupported_reason(parse_version("3.2.1"))
+        reason = Param("orientation", max_version="3.0.0").unsupported_reason(parse_version("3.2.1"))
         assert "orientation" in reason
         assert "3.0.0" in reason
         assert "3.2.1" in reason
 
     def test_malformed_bound_fails_at_construction(self):
         with pytest.raises(Exception):
-            DagParam("x", min_version="not-a-version")
+            Param("x", min_version="not-a-version")
 
     def test_params_are_frozen(self):
         with pytest.raises(Exception):
-            DagParam("x").key = "y"
+            Param("x").key = "y"
 
 
 class TestRegistry:
     def test_keys_are_unique(self):
-        keys = [param.key for param in DAG_PARAMS]
+        keys = [param.key for param in PARAMS]
         assert len(keys) == len(set(keys))
 
     def test_lookup_table_matches_the_list(self):
-        assert set(DAG_PARAMS_BY_KEY) == {param.key for param in DAG_PARAMS}
-        assert len(DAG_PARAMS_BY_KEY) == len(DAG_PARAMS)
+        assert set(PARAMS_BY_KEY) == {param.key for param in PARAMS}
+        assert len(PARAMS_BY_KEY) == len(PARAMS)
 
     def test_deprecated_entries_precede_their_canonical_key(self):
-        order = {param.key: index for index, param in enumerate(DAG_PARAMS)}
-        for param in DAG_PARAMS:
+        order = {param.key: index for index, param in enumerate(PARAMS)}
+        for param in PARAMS:
             if param.deprecated_in_favor_of:
                 assert (
                     param.deprecated_in_favor_of in order
@@ -66,15 +66,15 @@ class TestRegistry:
                 )
 
     def test_version_bounds_are_wellformed(self):
-        for param in DAG_PARAMS:
+        for param in PARAMS:
             if param.min_version and param.max_version:
                 assert parse_version(param.min_version) < parse_version(param.max_version)
 
     def test_exactly_one_required_param(self):
-        assert [param.key for param in DAG_PARAMS if param.required] == ["dag_id"]
+        assert [param.key for param in PARAMS if param.required] == ["dag_id"]
 
     def test_transforms_are_callable(self):
-        for param in DAG_PARAMS:
+        for param in PARAMS:
             if param.transform is not None:
                 assert callable(param.transform)
 
@@ -88,18 +88,18 @@ class TestHandling:
     def test_build_params_are_exactly_the_kwarg_entries(self):
         from dagfactory.parameters import BUILD_PARAMS, Handling
 
-        assert BUILD_PARAMS == [p for p in DAG_PARAMS if p.handling is Handling.KWARG]
+        assert BUILD_PARAMS == [p for p in PARAMS if p.handling is Handling.KWARG]
 
     def test_default_handling_is_kwarg(self):
         from dagfactory.parameters import Handling
 
-        assert DagParam("x").handling is Handling.KWARG
+        assert Param("x").handling is Handling.KWARG
 
     def test_custom_and_ignored_keys_are_not_forwarded(self):
         from dagfactory.parameters import BUILD_PARAMS, Handling
 
         forwarded = {p.key for p in BUILD_PARAMS}
-        for param in DAG_PARAMS:
+        for param in PARAMS:
             if param.handling is not Handling.KWARG:
                 assert param.key not in forwarded
 
@@ -107,15 +107,15 @@ class TestHandling:
         from dagfactory.parameters import Handling
 
         # configure_schedule() owns these, so _build_dag_kwargs must not touch them.
-        assert DAG_PARAMS_BY_KEY["schedule"].handling is Handling.CUSTOM
-        assert DAG_PARAMS_BY_KEY["schedule_interval"].handling is Handling.CUSTOM
+        assert PARAMS_BY_KEY["schedule"].handling is Handling.CUSTOM
+        assert PARAMS_BY_KEY["schedule_interval"].handling is Handling.CUSTOM
 
     def test_user_defined_macros_is_supported(self):
         from dagfactory.parameters import Handling
 
         # Support landed in main after #732 wrote the schema by hand; deriving
         # the annotation from `handling` is what keeps the two in step.
-        param = DAG_PARAMS_BY_KEY["user_defined_macros"]
+        param = PARAMS_BY_KEY["user_defined_macros"]
         assert param.handling is Handling.KWARG
         assert param.transform is not None
 
@@ -123,14 +123,14 @@ class TestHandling:
 class TestVersionFacts:
     def test_timetable_is_bounded_to_airflow_2(self):
         # Airflow 3's DAG has no `timetable` kwarg; forwarding it raises TypeError.
-        assert DAG_PARAMS_BY_KEY["timetable"].max_version == "3.0.0"
+        assert PARAMS_BY_KEY["timetable"].max_version == "3.0.0"
 
     def test_deprecated_alias_is_not_bounded_by_the_kwarg_it_replaces(self):
         # `concurrency` is rewritten to max_active_tasks, which Airflow 3 still takes.
-        concurrency = DAG_PARAMS_BY_KEY["concurrency"]
+        concurrency = PARAMS_BY_KEY["concurrency"]
         assert concurrency.max_version is None
         assert concurrency.target_key == "max_active_tasks"
 
     def test_deprecated_since_must_parse(self):
         with pytest.raises(Exception):
-            DagParam("x", deprecated_since="whenever")
+            Param("x", deprecated_since="whenever")
