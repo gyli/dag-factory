@@ -120,3 +120,60 @@ class TestLintAgreesWithBuild:
 
         assert "parameters.check" in inspect.getsource(DagBuilder.validate_config)
         assert "parameters.check" in inspect.getsource(lint_file)
+
+
+BASH = "airflow.providers.standard.operators.bash.BashOperator"
+
+TASKS = f"""
+my_dag:
+  start_date: 2024-01-01
+  tasks:
+    a:
+      operator: {BASH}
+      bash_command: echo hi
+"""
+
+
+class TestLintChecksTasks:
+    def test_a_bad_task_parameter_is_reported(self, tmp_path):
+        text = TASKS + "      retries: many\n"
+        result = lint_file(_write(tmp_path, "dag.yml", text), AF3, str(tmp_path))
+        assert any("retries" in f.message for f in result.errors)
+
+    def test_an_unimportable_operator_is_reported(self, tmp_path):
+        text = TASKS.replace(BASH, "airflow.operators.bash.NoSuchOperator")
+        result = lint_file(_write(tmp_path, "dag.yml", text), AF3, str(tmp_path))
+        assert any("Cannot import" in f.message for f in result.errors)
+
+    def test_a_missing_dependency_is_reported(self, tmp_path):
+        text = TASKS + "      dependencies: [ghost]\n"
+        result = lint_file(_write(tmp_path, "dag.yml", text), AF3, str(tmp_path))
+        assert any("does not exist" in f.message for f in result.errors)
+
+    def test_a_cycle_is_reported(self, tmp_path):
+        text = TASKS + f"""    b:
+      operator: {BASH}
+      bash_command: echo
+      dependencies: [a]
+"""
+        text = text.replace("      bash_command: echo hi\n", "      bash_command: echo hi\n      dependencies: [b]\n")
+        result = lint_file(_write(tmp_path, "dag.yml", text), AF3, str(tmp_path))
+        assert any("Cycle detected" in f.message for f in result.errors)
+
+    def test_operator_arguments_are_not_mistaken_for_typos(self, tmp_path):
+        text = TASKS + "      env: {A: '1'}\n      cwd: /tmp\n"
+        result = lint_file(_write(tmp_path, "dag.yml", text), AF3, str(tmp_path))
+        assert not result.findings, [f.render() for f in result.findings]
+
+    def test_dev_dags_produce_no_operator_false_positives(self):
+        """The repo's own examples must not trip the signature check."""
+        from pathlib import Path
+
+        root = Path("dev/dags")
+        files = [p for p in sorted(root.rglob("*.yml")) if p.name != "defaults.yml"]
+        spurious = []
+        for f in files:
+            for finding in lint_file(f, AF3, "dev/dags").findings:
+                if "is not an argument of this operator" in finding.message:
+                    spurious.append(finding.render())
+        assert not spurious, spurious

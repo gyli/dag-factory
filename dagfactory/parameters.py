@@ -19,6 +19,8 @@ Each entry maps a configuration key to a metadata mapping. Recognised fields:
     Tuple of permitted values.
 ``minimum``
     Smallest permitted number.
+``pattern``
+    Regular expression the whole value must match.
 ``min_version`` / ``max_version``
     The half-open Airflow range ``[min_version, max_version)`` in which the key
     applies, as PEP 440 strings. The upper bound is exclusive, so ``"3.0.0"``
@@ -48,6 +50,7 @@ Each entry maps a configuration key to a metadata mapping. Recognised fields:
 
 from __future__ import annotations
 
+import re
 from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -67,6 +70,7 @@ _FIELDS = frozenset(
         "types",
         "enum",
         "minimum",
+        "pattern",
         "min_version",
         "max_version",
         "deprecated_since",
@@ -89,7 +93,7 @@ DAG_AND_DEFAULTS = ("dag", "default_args")
 
 PARAM_METADATA: Dict[str, Dict[str, Any]] = {
     # ---- DAG-level, forwarded to DAG() -------------------------------------
-    "dag_id": {"types": (str,), "scope": DAG},
+    "dag_id": {"types": (str,), "pattern": r"^[A-Za-z0-9._-]+$", "scope": DAG},
     "dag_display_name": {"types": (str,), "scope": DAG},
     "description": {"types": (str,), "scope": DAG},
     "catchup": {"types": (bool,), "scope": DAG},
@@ -241,6 +245,8 @@ def _check_metadata() -> None:
             raise RuntimeError(f"'{key}' defers to unknown key '{target}'")
         if meta.get("transform") and not callable(meta["transform"]):
             raise RuntimeError(f"'{key}' has a non-callable transform")
+        if meta.get("pattern"):
+            re.compile(meta["pattern"])
     for key, needs in REQUIRES.items():
         for other in (key,) + tuple(needs):
             if other not in PARAM_METADATA:
@@ -388,6 +394,8 @@ def check(config: Dict[str, Any], airflow_version: Version, scope: str = "dag") 
             findings.append((ERROR, key, f"`{key}` should be one of {', '.join(map(str, meta['enum']))}."))
         if meta.get("minimum") is not None and isinstance(value, (int, float)) and value < meta["minimum"]:
             findings.append((ERROR, key, f"`{key}` should be at least {meta['minimum']}."))
+        if meta.get("pattern") and isinstance(value, str) and not re.fullmatch(meta["pattern"], value):
+            findings.append((ERROR, key, f"`{key}` should match {meta['pattern']}."))
 
     # Required-ness is a property of the whole config, not of one section: a
     # start_date under default_args satisfies the DAG. Only the top-level pass
@@ -414,4 +422,150 @@ def check(config: Dict[str, Any], airflow_version: Version, scope: str = "dag") 
         for severity, path, message in check(config["default_args"], airflow_version, scope="default_args"):
             findings.append((severity, f"default_args.{path}", message))
 
+    if scope == "dag":
+        findings.extend(check_tasks(config, airflow_version))
+
     return findings
+
+
+#: Task keys dag-factory consumes itself, so they never reach the operator.
+#: ``operator``/``decorator`` choose what to build, the rest steer how.
+DAGFACTORY_TASK_KEYS = frozenset(
+    {
+        "task_id",
+        "operator",
+        "decorator",
+        "dependencies",
+        "task_group_name",
+        "parent_group_name",
+        "expand",
+        "expand_kwargs",
+        "partial",
+        "multiple_outputs",
+        "python_callable",
+        "python_callable_name",
+        "python_callable_file",
+        "python_callable_lambda",
+        "response_check",
+        "response_check_name",
+        "response_check_file",
+        "response_check_lambda",
+        "callback",
+        "callback_name",
+        "callback_file",
+    }
+)
+
+
+def check_tasks(config: Dict[str, Any], airflow_version: Version) -> List[Tuple[str, str, str]]:
+    """Check each task's own parameters, and how the tasks fit together.
+
+    Task configs carry operator keyword arguments this table does not model, so
+    an unrecognised key is only reported when the operator could be imported
+    and does not accept it. Anything dag-factory consumes itself is skipped.
+    """
+    findings: List[Tuple[str, str, str]] = []
+    tasks = config.get("tasks")
+    if not isinstance(tasks, dict):
+        return findings
+
+    group_names = set(config.get("task_groups") or {})
+
+    for task_id, task in tasks.items():
+        if not isinstance(task, dict):
+            findings.append((ERROR, f"tasks.{task_id}", f"Task `{task_id}` should be a mapping."))
+            continue
+
+        prefix = f"tasks.{task_id}"
+        accepted = _operator_params(task, prefix, findings)
+
+        for severity, path, message in check(task, airflow_version, scope="task"):
+            # check() reports unknown keys, but at task level most keys are
+            # operator arguments rather than dag-factory parameters.
+            if path not in task or path in PARAM_METADATA:
+                findings.append((severity, f"{prefix}.{path}", message))
+                continue
+            if path in DAGFACTORY_TASK_KEYS or accepted is None or path in accepted:
+                continue
+            findings.append((WARNING, f"{prefix}.{path}", f"`{path}` is not an argument of this operator."))
+
+        for upstream in task.get("dependencies") or []:
+            if upstream not in tasks and upstream not in group_names:
+                findings.append(
+                    (ERROR, f"{prefix}.dependencies", f"`{task_id}` depends on `{upstream}`, which does not exist.")
+                )
+
+    findings.extend(_check_for_cycles(tasks))
+    return findings
+
+
+def _operator_params(task: Dict[str, Any], prefix: str, findings: List[Tuple[str, str, str]]):
+    """Import the task's operator and return the arguments it accepts.
+
+    Returns ``None`` when there is nothing to import or the import failed, in
+    which case the caller cannot say whether a key is valid.
+    """
+    from dagfactory.utils import import_string
+
+    target = task.get("operator") or task.get("decorator")
+    if not target:
+        findings.append((ERROR, prefix, "A task must define either `operator` or `decorator`."))
+        return None
+    if not isinstance(target, str):
+        return None
+
+    try:
+        obj = import_string(target)
+    except Exception as exc:
+        findings.append((ERROR, prefix, f"Cannot import `{target}`: {type(exc).__name__}: {exc}"))
+        return None
+    return _accepted_arguments(obj)
+
+
+@lru_cache(maxsize=None)
+def _accepted_arguments(obj) -> Optional[frozenset]:
+    """Keyword arguments *obj* accepts.
+
+    For an operator class that means walking the MRO, since operators pass
+    ``**kwargs`` up to ``BaseOperator``. Returns ``None`` when the signature
+    cannot be read, so the caller stays quiet rather than guessing.
+    """
+    import inspect
+
+    if inspect.isclass(obj):
+        signatures = []
+        for klass in obj.__mro__:
+            init = klass.__dict__.get("__init__")
+            if init is not None:
+                try:
+                    signatures.append(inspect.signature(init))
+                except (TypeError, ValueError):
+                    continue
+    else:
+        try:
+            signatures = [inspect.signature(obj)]
+        except (TypeError, ValueError):
+            signatures = []
+
+    if not signatures:
+        return None
+
+    return frozenset(
+        parameter.name
+        for signature in signatures
+        for parameter in signature.parameters.values()
+        if parameter.kind in (parameter.POSITIONAL_OR_KEYWORD, parameter.KEYWORD_ONLY) and parameter.name != "self"
+    )
+
+
+def _check_for_cycles(tasks: Dict[str, Any]) -> List[Tuple[str, str, str]]:
+    """Reuse the builder's topological sort to find dependency cycles."""
+    from dagfactory.dagbuilder import DagBuilder
+
+    try:
+        DagBuilder.topological_sort_tasks(tasks)
+    except ValueError as exc:
+        return [(ERROR, "tasks", str(exc))]
+    except Exception:
+        return []
+    return []

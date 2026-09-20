@@ -99,38 +99,42 @@ class TestVersionRules:
 
 class TestCheck:
     AF3 = Version("3.0.0")
+    #: A task that actually builds, so task-level checks have something real.
+    TASK = {"operator": "airflow.providers.standard.operators.bash.BashOperator", "bash_command": "echo"}
 
     def _keys(self, findings):
         return {(s, p) for s, p, _ in findings}
 
     def test_a_minimal_valid_config_is_clean(self):
-        assert check({"dag_id": "d", "start_date": "2024-01-01", "tasks": {"t": {}}}, self.AF3) == []
+        assert check({"dag_id": "d", "start_date": "2024-01-01", "tasks": {"t": self.TASK}}, self.AF3) == []
 
     def test_unknown_key_is_a_warning(self):
         assert (WARNING, "nonsense") in self._keys(
-            check({"dag_id": "d", "start_date": "2024-01-01", "tasks": {"t": {}}, "nonsense": 1}, self.AF3)
+            check({"dag_id": "d", "start_date": "2024-01-01", "tasks": {"t": self.TASK}, "nonsense": 1}, self.AF3)
         )
 
     def test_wrong_type_is_an_error(self):
-        findings = check({"dag_id": "d", "start_date": "2024-01-01", "tasks": {"t": {}}, "catchup": "yes"}, self.AF3)
+        findings = check(
+            {"dag_id": "d", "start_date": "2024-01-01", "tasks": {"t": self.TASK}, "catchup": "yes"}, self.AF3
+        )
         assert (ERROR, "catchup") in self._keys(findings)
 
     def test_bool_does_not_satisfy_int(self):
         findings = check(
-            {"dag_id": "d", "start_date": "2024-01-01", "tasks": {"t": {}}, "max_active_runs": True}, self.AF3
+            {"dag_id": "d", "start_date": "2024-01-01", "tasks": {"t": self.TASK}, "max_active_runs": True}, self.AF3
         )
         assert (ERROR, "max_active_runs") in self._keys(findings)
 
     def test_enum_violation_is_an_error(self):
         findings = check(
-            {"dag_id": "d", "start_date": "2024-01-01", "tasks": {"t": {}}, "orientation": "sideways"},
+            {"dag_id": "d", "start_date": "2024-01-01", "tasks": {"t": self.TASK}, "orientation": "sideways"},
             Version("2.10.0"),
         )
         assert (ERROR, "orientation") in self._keys(findings)
 
     def test_minimum_is_enforced(self):
         findings = check(
-            {"dag_id": "d", "start_date": "2024-01-01", "tasks": {"t": {}}, "max_active_runs": 0}, self.AF3
+            {"dag_id": "d", "start_date": "2024-01-01", "tasks": {"t": self.TASK}, "max_active_runs": 0}, self.AF3
         )
         assert (ERROR, "max_active_runs") in self._keys(findings)
 
@@ -139,41 +143,195 @@ class TestCheck:
         config = {
             "dag_id": "d",
             "start_date": datetime.datetime(2024, 1, 1),
-            "tasks": {"t": {}},
+            "tasks": {"t": self.TASK},
             "timetable": object(),
         }
         assert (ERROR, "start_date") not in self._keys(check(config, Version("2.10.0")))
         assert (ERROR, "timetable") not in self._keys(check(config, Version("2.10.0")))
 
     def test_start_date_may_come_from_default_args(self):
-        config = {"dag_id": "d", "tasks": {"t": {}}, "default_args": {"start_date": "2024-01-01"}}
+        config = {"dag_id": "d", "tasks": {"t": self.TASK}, "default_args": {"start_date": "2024-01-01"}}
         assert check(config, self.AF3) == []
 
     def test_start_date_missing_everywhere_is_an_error(self):
-        assert (ERROR, "start_date") in self._keys(check({"dag_id": "d", "tasks": {"t": {}}}, self.AF3))
+        assert (ERROR, "start_date") in self._keys(check({"dag_id": "d", "tasks": {"t": self.TASK}}, self.AF3))
 
     def test_mutually_exclusive_keys_error(self):
         config = {
             "dag_id": "d",
             "start_date": "2024-01-01",
-            "tasks": {"t": {}},
+            "tasks": {"t": self.TASK},
             "doc_md": "x",
             "doc_md_file_path": "/a",
         }
         assert any("single source" in m for _, _, m in check(config, self.AF3))
 
     def test_dependent_key_is_required(self):
-        config = {"dag_id": "d", "start_date": "2024-01-01", "tasks": {"t": {}}, "doc_md_python_callable_file": "/a.py"}
+        config = {
+            "dag_id": "d",
+            "start_date": "2024-01-01",
+            "tasks": {"t": self.TASK},
+            "doc_md_python_callable_file": "/a.py",
+        }
         assert any("also requires" in m for _, _, m in check(config, self.AF3))
 
     def test_default_args_are_checked_with_task_semantics(self):
-        config = {"dag_id": "d", "tasks": {"t": {}}, "default_args": {"start_date": "2024-01-01", "retries": "lots"}}
+        config = {
+            "dag_id": "d",
+            "tasks": {"t": self.TASK},
+            "default_args": {"start_date": "2024-01-01", "retries": "lots"},
+        }
         assert (ERROR, "default_args.retries") in self._keys(check(config, self.AF3))
 
     def test_a_dag_only_key_inside_default_args_is_flagged(self):
-        config = {"dag_id": "d", "tasks": {"t": {}}, "default_args": {"start_date": "2024-01-01", "catchup": False}}
+        config = {
+            "dag_id": "d",
+            "tasks": {"t": self.TASK},
+            "default_args": {"start_date": "2024-01-01", "catchup": False},
+        }
         assert (WARNING, "default_args.catchup") in self._keys(check(config, self.AF3))
 
     def test_deprecation_is_a_warning(self):
-        config = {"dag_id": "d", "start_date": "2024-01-01", "tasks": {"t": {}}, "concurrency": 4}
+        config = {"dag_id": "d", "start_date": "2024-01-01", "tasks": {"t": self.TASK}, "concurrency": 4}
         assert (WARNING, "concurrency") in self._keys(check(config, self.AF3))
+
+
+BASH = "airflow.providers.standard.operators.bash.BashOperator"
+
+
+class TestTaskChecks:
+    """Task parameters are checked with task-level semantics."""
+
+    AF3 = Version("3.0.0")
+
+    def _check(self, tasks, **extra):
+        config = {"dag_id": "d", "start_date": "2024-01-01", "tasks": tasks, **extra}
+        return check(config, self.AF3)
+
+    def _keys(self, findings):
+        return {(s, p) for s, p, _ in findings}
+
+    def test_a_valid_task_is_clean(self):
+        assert self._check({"t": {"operator": BASH, "bash_command": "echo"}}) == []
+
+    def test_wrong_type_on_a_task_parameter(self):
+        findings = self._check({"t": {"operator": BASH, "bash_command": "echo", "retries": "many"}})
+        assert (ERROR, "tasks.t.retries") in self._keys(findings)
+
+    def test_task_parameter_removed_in_this_airflow(self):
+        """sla goes in Airflow 3.1, so 3.0 only deprecates it."""
+        task = {"t": {"operator": BASH, "bash_command": "echo", "sla": 300}}
+        base = {"dag_id": "d", "start_date": "2024-01-01", "tasks": task}
+
+        at_30 = check(base, Version("3.0.0"))
+        assert (WARNING, "tasks.t.sla") in {(s, p) for s, p, _ in at_30}
+
+        at_31 = check(base, Version("3.1.0"))
+        assert (ERROR, "tasks.t.sla") in {(s, p) for s, p, _ in at_31}
+
+    def test_operator_keyword_arguments_are_not_flagged(self):
+        """bash_command is not in the table; the operator accepts it."""
+        findings = self._check({"t": {"operator": BASH, "bash_command": "echo", "env": {"A": "1"}}})
+        assert findings == []
+
+    def test_dagfactory_task_keys_are_not_flagged(self):
+        findings = self._check(
+            {
+                "a": {"operator": BASH, "bash_command": "echo"},
+                "b": {"operator": BASH, "bash_command": "echo", "dependencies": ["a"], "task_id": "b"},
+            }
+        )
+        assert findings == []
+
+    def test_key_the_operator_does_not_accept_is_a_warning(self):
+        findings = self._check({"t": {"operator": BASH, "bash_command": "echo", "nonsense_key": 1}})
+        assert (WARNING, "tasks.t.nonsense_key") in self._keys(findings)
+
+    def test_unimportable_operator_is_an_error(self):
+        findings = self._check({"t": {"operator": "airflow.operators.bash.NoSuchOperator"}})
+        assert any("Cannot import" in m for _, _, m in findings)
+
+    def test_unknown_keys_are_not_guessed_when_the_operator_is_unimportable(self):
+        """With no signature to consult, only the import error is reported."""
+        findings = self._check({"t": {"operator": "no.such.module.Operator", "whatever": 1}})
+        assert [p for _, p, _ in findings] == ["tasks.t"]
+
+    def test_a_task_must_declare_operator_or_decorator(self):
+        findings = self._check({"t": {"bash_command": "echo"}})
+        assert any("operator" in m and "decorator" in m for _, _, m in findings)
+
+    def test_a_decorator_task_is_accepted(self):
+        findings = self._check({"t": {"decorator": "airflow.sdk.task", "python_callable_name": "f"}})
+        assert not [f for f in findings if "operator" in f[2] and "decorator" in f[2]]
+
+    def test_a_task_that_is_not_a_mapping_is_an_error(self):
+        assert (ERROR, "tasks.not_a_map") in self._keys(self._check({"not_a_map": "oops"}))
+
+
+class TestDependencyChecks:
+    AF3 = Version("3.0.0")
+
+    def _check(self, tasks, task_groups=None):
+        config = {"dag_id": "d", "start_date": "2024-01-01", "tasks": tasks}
+        if task_groups is not None:
+            config["task_groups"] = task_groups
+        return check(config, self.AF3)
+
+    def test_dependency_on_a_missing_task_is_an_error(self):
+        findings = self._check({"t": {"operator": BASH, "bash_command": "e", "dependencies": ["nope"]}})
+        assert any("does not exist" in m for _, _, m in findings)
+
+    def test_dependency_on_a_real_task_is_fine(self):
+        findings = self._check(
+            {
+                "a": {"operator": BASH, "bash_command": "e"},
+                "b": {"operator": BASH, "bash_command": "e", "dependencies": ["a"]},
+            }
+        )
+        assert findings == []
+
+    def test_dependency_on_a_task_group_is_fine(self):
+        findings = self._check(
+            {"a": {"operator": BASH, "bash_command": "e", "dependencies": ["tg"]}},
+            task_groups={"tg": {"tooltip": "x"}},
+        )
+        assert findings == []
+
+    def test_a_cycle_is_an_error(self):
+        findings = self._check(
+            {
+                "a": {"operator": BASH, "bash_command": "e", "dependencies": ["b"]},
+                "b": {"operator": BASH, "bash_command": "e", "dependencies": ["a"]},
+            }
+        )
+        assert any("Cycle detected" in m for _, _, m in findings)
+
+    def test_a_long_chain_is_not_a_cycle(self):
+        tasks = {"t0": {"operator": BASH, "bash_command": "e"}}
+        for i in range(1, 6):
+            tasks[f"t{i}"] = {"operator": BASH, "bash_command": "e", "dependencies": [f"t{i-1}"]}
+        assert self._check(tasks) == []
+
+
+class TestPattern:
+    def test_dag_id_pattern_is_enforced(self):
+        findings = check(
+            {
+                "dag_id": "has spaces!",
+                "start_date": "2024-01-01",
+                "tasks": {"t": {"operator": BASH, "bash_command": "e"}},
+            },
+            Version("3.0.0"),
+        )
+        assert any("should match" in m for _, _, m in findings)
+
+    def test_a_valid_dag_id_passes(self):
+        findings = check(
+            {
+                "dag_id": "fine.dag-id_1",
+                "start_date": "2024-01-01",
+                "tasks": {"t": {"operator": BASH, "bash_command": "e"}},
+            },
+            Version("3.0.0"),
+        )
+        assert findings == []
