@@ -349,19 +349,24 @@ def scope_of(key: str) -> Tuple[str, ...]:
     return tuple(PARAM_METADATA.get(key, {}).get("scope", DAG))
 
 
-def check(config: Dict[str, Any], airflow_version: Version, scope: str = "dag") -> List[Tuple[str, str, str]]:
-    """Check a resolved config's own parameters against the metadata.
+def check(
+    config: Dict[str, Any],
+    airflow_version: Version,
+    scope: str = "dag",
+    check_values: bool = True,
+    report_unknown: bool = True,
+) -> List[Tuple[str, str, str]]:
+    """Check one section of a resolved config against the metadata.
 
-    Covers the DAG body and ``default_args``, and deliberately stops there:
-    everything here is something Airflow accepts silently. A parameter this
-    Airflow dropped, a key at the wrong level, a misspelling, a bad type on a
-    DAG argument — all of them build a subtly wrong DAG without complaint, so
-    both ``dagfactory lint`` and ``DagBuilder.build`` run these.
+    *scope* says which section: the DAG body, a task, or ``default_args``.
+    *check_values* covers types, enums, minimums and patterns; callers turn it
+    off for sections whose values reach an Airflow operator, because Airflow
+    validates operator arguments itself and says it better. *report_unknown*
+    is turned off for tasks, where most keys are operator arguments this table
+    does not model and :func:`check_tasks` decides instead.
 
-    Task-level problems are not checked here. Airflow raises a clear error for
-    every one of them while building, so repeating the work would only slow
-    DAG parsing down and report each problem twice. ``dagfactory lint`` calls
-    :func:`check_tasks` for those, because lint never builds anything.
+    Use :func:`check_for_build` or :func:`check_for_lint` rather than calling
+    this directly; they encode which sections each caller should check.
 
     The config must already be resolved — defaults merged, values cast.
     """
@@ -372,7 +377,7 @@ def check(config: Dict[str, Any], airflow_version: Version, scope: str = "dag") 
         if key not in known:
             if key in PARAM_METADATA:
                 findings.append((WARNING, key, f"`{key}` is not valid at {scope} level."))
-            else:
+            elif report_unknown:
                 findings.append((WARNING, key, f"`{key}` is not a known dag-factory parameter."))
             continue
 
@@ -390,7 +395,7 @@ def check(config: Dict[str, Any], airflow_version: Version, scope: str = "dag") 
             hint = f" Use `{target}` instead." if target else ""
             findings.append((WARNING, key, f"`{key}` is deprecated as of Airflow {since}.{hint}"))
 
-        if value is None:
+        if value is None or not check_values:
             continue
         expected = meta.get("types")
         if expected and not _type_ok(value, expected):
@@ -425,11 +430,50 @@ def check(config: Dict[str, Any], airflow_version: Version, scope: str = "dag") 
                 if config.get(other) is None:
                     findings.append((ERROR, key, f"`{key}` also requires `{other}` to be set."))
 
-    if scope == "dag" and isinstance(config.get("default_args"), dict):
-        for severity, path, message in check(config["default_args"], airflow_version, scope="default_args"):
-            findings.append((severity, f"default_args.{path}", message))
-
     return findings
+
+
+def _under(prefix: str, findings: List[Tuple[str, str, str]]) -> List[Tuple[str, str, str]]:
+    return [(severity, f"{prefix}.{path}", message) for severity, path, message in findings]
+
+
+def check_for_build(config: Dict[str, Any], airflow_version: Version) -> List[Tuple[str, str, str]]:
+    """The checks worth running while building a DAG.
+
+    Only what Airflow accepts silently. A DAG argument of the wrong type, a
+    parameter this Airflow no longer takes, a key at the wrong level, a
+    misspelling — each of those builds a subtly wrong DAG with no complaint
+    from anyone, so they are worth reporting.
+
+    Everything Airflow reports for itself is left to Airflow. Values inside
+    ``default_args`` reach an operator, which type-checks them and raises with
+    a better message, so their shape is not checked here. Tasks are skipped
+    entirely for the same reason: an unimportable operator raises ImportError,
+    a bad argument raises TypeError, a missing dependency raises KeyError and
+    a cycle raises ValueError.
+    """
+    findings = check(config, airflow_version)
+    default_args = config.get("default_args")
+    if isinstance(default_args, dict):
+        findings += _under(
+            "default_args",
+            check(default_args, airflow_version, scope="default_args", check_values=False),
+        )
+    return findings
+
+
+def check_for_lint(config: Dict[str, Any], airflow_version: Version) -> List[Tuple[str, str, str]]:
+    """Everything ``dagfactory lint`` reports.
+
+    Lint never builds, so it has to cover the ground Airflow would otherwise
+    cover at build time: the shape of ``default_args`` values, and every
+    task-level problem.
+    """
+    findings = check(config, airflow_version)
+    default_args = config.get("default_args")
+    if isinstance(default_args, dict):
+        findings += _under("default_args", check(default_args, airflow_version, scope="default_args"))
+    return findings + check_tasks(config, airflow_version)
 
 
 #: Task keys dag-factory consumes itself, so they never reach the operator.
@@ -490,15 +534,15 @@ def check_tasks(config: Dict[str, Any], airflow_version: Version) -> List[Tuple[
         prefix = f"tasks.{task_id}"
         accepted = _operator_params(task, prefix, findings)
 
-        for severity, path, message in check(task, airflow_version, scope="task"):
-            # check() reports unknown keys, but at task level most keys are
-            # operator arguments rather than dag-factory parameters.
-            if path not in task or path in PARAM_METADATA:
-                findings.append((severity, f"{prefix}.{path}", message))
-                continue
-            if path in DAGFACTORY_TASK_KEYS or accepted is None or path in accepted:
-                continue
-            findings.append((WARNING, f"{prefix}.{path}", f"`{path}` is not an argument of this operator."))
+        findings += _under(prefix, check(task, airflow_version, scope="task", report_unknown=False))
+
+        # Whether a key this table does not model is a typo depends on the
+        # operator, so it is only judged when the operator could be imported.
+        if accepted is not None:
+            for key in task:
+                if key in PARAM_METADATA or key in DAGFACTORY_TASK_KEYS or key in accepted:
+                    continue
+                findings.append((WARNING, f"{prefix}.{key}", f"`{key}` is not an argument of this operator."))
 
         for upstream in task.get("dependencies") or []:
             if upstream not in tasks and upstream not in group_names:

@@ -105,17 +105,20 @@ every configuration key dag-factory accepts. `lint` reports what it says, and
 `DagBuilder.build()` calls the same `parameters.check()` on every resolved
 config before constructing the DAG — so a fact is stated once.
 
-The two do not run exactly the same checks. `check()` covers the DAG body and
-`default_args`, which is everything Airflow accepts silently: a parameter this
-Airflow dropped, a key at the wrong level, a misspelling, a bad type on a DAG
-argument. Those build a subtly wrong DAG without complaint, so the builder
-checks them too.
+The two do not run the same checks, and the rule is simple: **dag-factory
+reports what Airflow accepts silently, and leaves the rest to Airflow.**
 
-Task-level problems are `lint`'s alone, through `check_tasks()`. Building a DAG
-already raises a clear error for each of them — `ImportError` for an operator
-that cannot be imported, `TypeError` for a bad or unrecognised argument,
-`KeyError` for a missing dependency, `ValueError` for a cycle — so the builder
-does not repeat the work, which would only report every problem twice.
+`check_for_build()` is what the builder runs. It covers the DAG body in full,
+plus the parts of `default_args` that Airflow says nothing about — a key at the
+wrong level, a misspelling, a parameter this Airflow dropped. Each of those
+builds a subtly wrong DAG with no complaint from anyone.
+
+`check_for_lint()` adds everything Airflow would have caught at build time,
+because lint never builds: the shape of `default_args` values, and every
+task-level problem. Building a DAG raises `ImportError` for an operator that
+cannot be imported, `TypeError` for a bad or unrecognised argument, `KeyError`
+for a missing dependency and `ValueError` for a cycle, so the builder does not
+repeat any of it.
 
 Version ranges are the half-open interval `[min_version, max_version)` in PEP
 440, where the upper bound is exclusive: `"3.0.0"` means gone in 3.0.

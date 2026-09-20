@@ -813,16 +813,16 @@ class DagBuilder:
     def validate_config(dag_params: Dict[str, Any]) -> None:
         """Check a resolved DAG config against the parameter metadata.
 
-        Runs the same table, through the same function, that ``dagfactory
-        lint`` uses, so a config that lints clean builds without complaint.
-        Findings are logged; under ``strict_mode`` an error stops the build.
+        Reports only what Airflow accepts silently; see
+        :func:`dagfactory.parameters.check_for_build`. Findings are logged;
+        under ``strict_mode`` an error stops the build.
         """
         if not settings.validate_on_build:
             return
 
         dag_id = dag_params.get("dag_id")
         errors = []
-        for severity, path, message in parameters.check(dag_params, INSTALLED_AIRFLOW_VERSION):
+        for severity, path, message in parameters.check_for_build(dag_params, INSTALLED_AIRFLOW_VERSION):
             rendered = f"[{dag_id}.{path}] {message}" if path else f"[{dag_id}] {message}"
             if severity == parameters.ERROR:
                 errors.append(rendered)

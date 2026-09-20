@@ -11,6 +11,8 @@ from dagfactory.parameters import (
     PARAM_METADATA,
     WARNING,
     check,
+    check_for_build,
+    check_for_lint,
     check_tasks,
     dag_argument_names,
     keys_in_scope,
@@ -189,7 +191,7 @@ class TestCheck:
             "tasks": {"t": self.TASK},
             "default_args": {"start_date": "2024-01-01", "retries": "lots"},
         }
-        assert (ERROR, "default_args.retries") in self._keys(check(config, self.AF3))
+        assert (ERROR, "default_args.retries") in self._keys(check_for_lint(config, self.AF3))
 
     def test_a_dag_only_key_inside_default_args_is_flagged(self):
         config = {
@@ -197,7 +199,7 @@ class TestCheck:
             "tasks": {"t": self.TASK},
             "default_args": {"start_date": "2024-01-01", "catchup": False},
         }
-        assert (WARNING, "default_args.catchup") in self._keys(check(config, self.AF3))
+        assert (WARNING, "default_args.catchup") in self._keys(check_for_lint(config, self.AF3))
 
     def test_deprecation_is_a_warning(self):
         config = {"dag_id": "d", "start_date": "2024-01-01", "tasks": {"t": self.TASK}, "concurrency": 4}
@@ -346,42 +348,58 @@ class TestPattern:
         assert findings == []
 
 
-class TestBuildSkipsTaskChecks:
-    """check() is what DagBuilder.build runs; it must stay off the task path.
+class TestBuildChecksOnlyWhatAirflowMisses:
+    """check_for_build is what DagBuilder.build runs.
 
-    Airflow raises a clear error for every task-level problem while building,
-    so repeating the checks would slow DAG parsing and report twice.
+    Anything Airflow reports for itself is left to Airflow, so the same
+    problem is never reported twice. Anything Airflow accepts silently has to
+    be reported here or nowhere.
     """
 
     AF3 = Version("3.0.0")
 
-    def _config(self, task):
-        return {"dag_id": "d", "start_date": "2024-01-01", "tasks": {"t": task}}
+    def _config(self, task=None, **extra):
+        config = {
+            "dag_id": "d",
+            "start_date": "2024-01-01",
+            "tasks": {"t": task or {"operator": BASH, "bash_command": "e"}},
+        }
+        config.update(extra)
+        return config
 
-    def test_check_ignores_a_broken_operator(self):
-        config = self._config({"operator": "no.such.module.Operator"})
-        assert check(config, self.AF3) == []
-        assert check_tasks(config, self.AF3) != []
+    def _paths(self, findings):
+        return {p for _, p, _ in findings}
 
-    def test_check_ignores_bad_task_arguments(self):
-        config = self._config({"operator": BASH, "bash_command": "e", "retries": "many"})
-        assert check(config, self.AF3) == []
-        assert check_tasks(config, self.AF3) != []
+    # --- left to Airflow -------------------------------------------------
+    def test_skips_task_checks(self):
+        for task in (
+            {"operator": "no.such.module.Operator"},
+            {"operator": BASH, "bash_command": "e", "retries": "many"},
+            {"operator": BASH, "bash_command": "e", "dependencies": ["ghost"]},
+        ):
+            config = self._config(task)
+            assert check_for_build(config, self.AF3) == [], task
+            assert check_for_lint(config, self.AF3) != [], task
 
-    def test_check_ignores_dependency_problems(self):
-        config = self._config({"operator": BASH, "bash_command": "e", "dependencies": ["ghost"]})
-        assert check(config, self.AF3) == []
-        assert check_tasks(config, self.AF3) != []
+    def test_skips_the_shape_of_default_args_values(self):
+        """These reach an operator, which type-checks them and raises."""
+        config = self._config(default_args={"start_date": "2024-01-01", "retries": "many"})
+        assert "default_args.retries" not in self._paths(check_for_build(config, self.AF3))
+        assert "default_args.retries" in self._paths(check_for_lint(config, self.AF3))
 
-    def test_check_still_reports_dag_level_problems(self):
-        """These Airflow accepts silently, so the builder must keep checking."""
-        config = self._config({"operator": BASH, "bash_command": "e"})
-        config["catchup"] = "notabool"
-        config["nonsense_key"] = 1
-        paths = {p for _, p, _ in check(config, self.AF3)}
-        assert {"catchup", "nonsense_key"} <= paths
+    # --- silent in Airflow, so still checked ------------------------------
+    def test_reports_dag_level_problems(self):
+        config = self._config(catchup="notabool", nonsense_key=1)
+        assert {"catchup", "nonsense_key"} <= self._paths(check_for_build(config, self.AF3))
 
-    def test_check_still_reports_default_args_problems(self):
-        config = self._config({"operator": BASH, "bash_command": "e"})
-        config["default_args"] = {"catchup": False}
-        assert any(p == "default_args.catchup" for _, p, _ in check(config, self.AF3))
+    def test_reports_a_dag_key_misplaced_in_default_args(self):
+        config = self._config(default_args={"start_date": "2024-01-01", "catchup": False})
+        assert "default_args.catchup" in self._paths(check_for_build(config, self.AF3))
+
+    def test_reports_an_unknown_key_in_default_args(self):
+        config = self._config(default_args={"start_date": "2024-01-01", "nonsense": 1})
+        assert "default_args.nonsense" in self._paths(check_for_build(config, self.AF3))
+
+    def test_reports_a_version_gated_key_in_default_args(self):
+        config = self._config(default_args={"start_date": "2024-01-01", "sla": 300})
+        assert "default_args.sla" in self._paths(check_for_build(config, Version("3.1.0")))
