@@ -168,25 +168,6 @@ _WARNING_KEYWORDS = {"x-deprecated-since", "x-dagfactory-supported"}
 #: Findings that say the key does not exist on the configured Airflow at all.
 _VERSION_RANGE_KEYWORDS = {"x-airflow-min-version", "x-airflow-max-version"}
 
-# Top-level fields commonly supplied via the external defaults.yml chain rather
-# than the DAG's own YAML — see _is_defaults_satisfiable_requirement.
-_DEFAULTS_SATISFIABLE_REQUIRED_FIELDS = {"tasks"}
-
-
-def _is_defaults_satisfiable_requirement(error: ValidationError) -> bool:
-    """True if *error* is a `tasks`/`start_date` requirement that an external
-    defaults.yml chain could plausibly satisfy.
-
-    Used only by callers that don't resolve that chain themselves, to avoid
-    reporting a hard error for a DAG that would build fine in practice.
-    """
-    if error.validator == "required":
-        return bool(_DEFAULTS_SATISFIABLE_REQUIRED_FIELDS.intersection(error.validator_value or []))
-    if error.validator == "x-required-anywhere":
-        fields = {f for group in (error.validator_value or []) for f in group.get("fields", [])}
-        return any(f == "start_date" or f.endswith(".start_date") for f in fields)
-    return False
-
 
 # ---------------------------------------------------------------------------
 # Loader interception (schema-only mode)
@@ -339,11 +320,7 @@ class DagParameterValidator:
                     f"Failed to load YAML: {type(exc).__name__}: {exc}",
                 )
             ]
-        return [
-            self._validate_yaml_config(
-                config, yaml_file_path, config_filepath=str(yaml_file_path), defaults_unresolved=False
-            )
-        ]
+        return [self._validate_yaml_config(config, yaml_file_path, config_filepath=str(yaml_file_path))]
 
     def validate_yaml_content(
         self, yaml_content: str, source_label: str = "<inline yaml>"
@@ -375,15 +352,13 @@ class DagParameterValidator:
         config: Any,
         source: Path,
         config_filepath: Optional[str] = None,
-        defaults_unresolved: bool = True,
     ) -> FileValidationResult:
         """Validate a parsed YAML dict; routes through schema or build mode.
 
         When *config_filepath* is given the factory is built from the path, so
-        the external ``defaults.yml`` chain is resolved just as it is at
-        runtime. Without one there is no location to walk up from, and
-        *defaults_unresolved* softens the requirement failures that defaults
-        would have satisfied.
+        the external ``defaults.yml`` chain is resolved by walking up from it,
+        just as at runtime. Inline content has no location to walk up from, so
+        its defaults come from ``defaults_config_path`` alone.
         """
         result = FileValidationResult(file=source)
 
@@ -480,23 +455,14 @@ class DagParameterValidator:
                     )
                 )
                 continue
-            self._validate_dag(source, builder.dag_name, merged, result, defaults_unresolved=defaults_unresolved)
+            self._validate_dag(source, builder.dag_name, merged, result)
         return result
-
-    def _find_dag_objects(module) -> Dict[str, object]:
-        """Collect any Airflow DAG instances registered in the module globals."""
-        try:
-            from airflow.sdk.definitions.dag import DAG
-        except ImportError:
-            from airflow.models import DAG
-        return {name: obj for name, obj in vars(module).items() if isinstance(obj, DAG)}
 
     def iter_issues(
         self,
         config: Dict[str, Any],
         dag_id: Optional[str] = None,
         file_path: Optional[Path] = None,
-        defaults_unresolved: bool = False,
     ) -> Iterator[ValidationIssue]:
         """Yield the schema findings for one fully resolved DAG config.
 
@@ -505,9 +471,8 @@ class DagParameterValidator:
         ``DagBuilder.build`` calls it directly, so a config that lints clean is
         one that builds without schema complaints.
 
-        ``defaults_unresolved`` softens ``tasks``/``start_date`` requirement
-        failures to warnings, for callers that have not applied the external
-        ``defaults.yml`` chain.
+        The config must already be resolved: defaults merged, values cast.
+        Whatever is missing here is missing for real.
         """
         errors = list(self._validator.iter_errors(config))
 
@@ -519,8 +484,6 @@ class DagParameterValidator:
             if error.validator == "x-deprecated-since" and tuple(error.absolute_path) in out_of_range:
                 continue
             severity = "warning" if error.validator in _WARNING_KEYWORDS else "error"
-            if defaults_unresolved and _is_defaults_satisfiable_requirement(error):
-                severity = "warning"
             yield ValidationIssue(
                 file=file_path if file_path is not None else Path("<config>"),
                 dag_id=dag_id,
@@ -535,14 +498,6 @@ class DagParameterValidator:
         dag_id: str,
         merged: Dict[str, Any],
         result: FileValidationResult,
-        defaults_unresolved: bool = False,
     ) -> None:
         """Append the findings for one merged DAG config to *result*."""
-        result.issues.extend(
-            self.iter_issues(
-                merged,
-                dag_id=dag_id,
-                file_path=file_path,
-                defaults_unresolved=defaults_unresolved,
-            )
-        )
+        result.issues.extend(self.iter_issues(merged, dag_id=dag_id, file_path=file_path))

@@ -100,16 +100,25 @@ def test_validate_yaml_file_missing_tasks_is_an_error(tmp_path):
     assert any("tasks" in e.message for e in results[0].errors)
 
 
-def test_validate_yaml_content_still_softens_defaults_satisfiable_fields(tmp_path):
-    """Inline YAML has no location, so the defaults chain cannot be walked.
+def test_validate_yaml_content_reports_a_genuinely_missing_field(tmp_path):
+    """Nothing is softened: what the validator was given has no start_date.
 
-    Those fields stay warnings there, which is why the softening still exists.
+    Inline YAML has no location to walk up from, so unless a defaults root is
+    supplied there is no defaults.yml to satisfy the requirement.
     """
-    results = DagParameterValidator(airflow_version="3").validate_yaml_content(
+    results = DagParameterValidator(airflow_version="3", defaults_config_path=str(tmp_path)).validate_yaml_content(
         "my_dag:\n  tasks:\n    - task_id: t\n      operator: x\n"
     )
-    assert not results[0].errors
-    assert any("start_date" in w.message for w in results[0].warnings)
+    assert any("start_date" in e.message for e in results[0].errors)
+
+
+def test_validate_yaml_content_resolves_defaults_from_the_supplied_root(tmp_path):
+    """Point --defaults-path at the root and inline content is clean."""
+    (tmp_path / "defaults.yml").write_text('default_args:\n  start_date: "2024-01-01"\n')
+    results = DagParameterValidator(airflow_version="3", defaults_config_path=str(tmp_path)).validate_yaml_content(
+        "my_dag:\n  tasks:\n    - task_id: t\n      operator: x\n"
+    )
+    assert not results[0].issues, [i.render() for i in results[0].issues]
 
 
 # ---------------------------------------------------------------------------

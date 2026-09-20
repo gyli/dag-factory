@@ -158,14 +158,22 @@ def main(
 def lint(
     path: Optional[Path] = typer.Argument(
         None,
-        help="Path to a Python loader (.py) file, a YAML config (.yml/.yaml) file, "
-        "or a directory containing either. External defaults are not supported when linting YAML files.",
+        help=(
+            "Path to a YAML config (.yml/.yaml) or a directory of them. The defaults.yml "
+            "chain is resolved by walking up from the file, as dag-factory does at runtime."
+        ),
     ),
     yaml_content: Optional[str] = typer.Option(
         None,
         "--yaml-content",
         "-c",
-        help="Inline YAML content to validate (mutually exclusive with the path argument).",
+        help=(
+            "Inline YAML to validate, as a complete DAG config: one or more top-level DAG "
+            "entries, with everything they need to build. Mutually exclusive with the path "
+            "argument. A string has no location on disk, so the defaults.yml chain cannot be "
+            "walked up from it; pass --defaults-path to supply one, or anything inherited "
+            "from defaults will be reported as missing."
+        ),
     ),
     airflow_version: str = typer.Option(
         AIRFLOW_VERSION,
@@ -185,13 +193,14 @@ def lint(
         "--defaults-path",
         help=(
             "Root directory to search for defaults.yml/defaults.yaml, as dag-factory does at "
-            "runtime. Defaults to Airflow's dags_folder."
+            "runtime. Defaults to Airflow's dags_folder. Required with --yaml-content when the "
+            "config inherits anything from a defaults file."
         ),
     ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show full error messages"),
     ignore: Path = typer.Option(None, "--ignore", "-i", help="Files or directories to ignore"),
 ):
-    """Validate dag-factory loaders and YAML configs.
+    """Validate dag-factory YAML configs.
 
     Takes a YAML config or a directory of them. Files named defaults.yml /
     defaults.yaml are dag-factory infrastructure and are skipped, though their

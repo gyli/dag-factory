@@ -39,11 +39,16 @@ Validate DAG parameters end-to-end. The lint command accepts three input modes a
 | Input                | Example                                                  | What is validated                                                                                                                                |
 | -------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
 | YAML file (`.yml`/`.yaml`) | `dagfactory lint dags/my_dag.yml`                  | Each top-level DAG entry is validated as a self-contained config. The file's own `default:` block **and** the external `defaults.yml` chain are applied, by handing the file path to the same factory the runtime uses. Set the search root with `--defaults-path`; it defaults to Airflow's `dags_folder`. |
-| Inline YAML          | `dagfactory lint --yaml-content "$(cat my_dag.yml)"`     | Same semantics, supplied as a string. There is no file location to walk up from, so the external `defaults.yml` chain cannot be resolved; a DAG missing `start_date`/`tasks` is reported as a warning rather than an error. |
+| Inline YAML          | `dagfactory lint --yaml-content "$(cat my_dag.yml)"`     | The string must be a **complete DAG config**: one or more top-level DAG entries with everything they need to build. A string has no location on disk, so the `defaults.yml` chain cannot be walked up from it — pass `--defaults-path` to give it a root, or anything inherited from defaults is reported as missing. |
 
 When a directory is passed, every `.yml`/`.yaml` file under it is linted. Files named `defaults.yml`/`defaults.yaml` are dag-factory infrastructure rather than DAG configs, so they are not linted in their own right; their contents are still merged into the DAGs that inherit from them.
 
 Linting a Python loader is not supported. The loaders exist to call `load_yaml_dags(...)`; the configuration that can actually be wrong lives in the YAML, and the defaults chain those loaders used to be needed for is now resolved directly from the YAML's path.
+
+Nothing is softened. Whatever the validator is handed is what it checks, so a
+`start_date` that no resolved `defaults.yml` supplies is an error rather than a
+warning. If a config legitimately inherits one, point `--defaults-path` at the
+root that holds it.
 
 ### Validation strategies
 
@@ -66,10 +71,11 @@ Lint a YAML config against Airflow 2 (schema-only):
 dagfactory lint --schema-only --airflow-version 2 dev/dags/airflow2/example_params.yml
 ```
 
-Lint inline YAML supplied from a script or editor:
+Lint inline YAML supplied from a script or editor, with a defaults root so
+inherited values resolve:
 
 ```bash
-dagfactory lint --schema-only --yaml-content "$(cat my_dag.yml)"
+dagfactory lint --schema-only --defaults-path dags/ --yaml-content "$(cat my_dag.yml)"
 ```
 
 Lint every config under a folder:
