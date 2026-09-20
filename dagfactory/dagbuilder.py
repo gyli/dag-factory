@@ -10,7 +10,7 @@ import re
 import warnings
 from copy import deepcopy
 from datetime import datetime
-from functools import partial
+from functools import lru_cache, partial
 from typing import Any, Callable, Dict, List, Tuple, Union
 
 from packaging import version
@@ -150,6 +150,18 @@ SYSTEM_PARAMS: List[str] = ["operator", "dependencies", "task_group_name", "pare
 INSTALLED_AIRFLOW_VERSION = version.parse(AIRFLOW_VERSION)
 
 
+@lru_cache(maxsize=None)
+def _config_validator(airflow_version: str):
+    """The validator used while building, built once per process.
+
+    Constructing one compiles the schema, so it is cached rather than rebuilt
+    for every DAG in a file.
+    """
+    from dagfactory.validator import DagParameterValidator
+
+    return DagParameterValidator(airflow_version=airflow_version)
+
+
 class DagBuilder:
     """
     Generates tasks and a DAG from a config.
@@ -272,11 +284,6 @@ class DagBuilder:
             )
 
         return dag_params
-
-    @staticmethod
-    def _resolve_user_defined_macros(macros: Dict[str, Any], path: str = "user_defined_macros") -> Dict[str, Any]:
-        """Deprecated shim. Use :func:`dagfactory.utils.resolve_user_defined_macros`."""
-        return utils.resolve_user_defined_macros(macros, path=path)
 
     @staticmethod
     def _handle_http_sensor(operator_obj, task_params):
@@ -826,9 +833,7 @@ class DagBuilder:
         if not settings.validate_on_build:
             return
 
-        from dagfactory.validator import DagParameterValidator
-
-        validator = DagParameterValidator(airflow_version=str(INSTALLED_AIRFLOW_VERSION))
+        validator = _config_validator(str(INSTALLED_AIRFLOW_VERSION))
         dag_id = dag_params.get("dag_id")
         errors = []
         for issue in validator.iter_issues(dag_params, dag_id=dag_id):

@@ -6,7 +6,7 @@ After installing DAG Factory, the CLI can be invoked using the `dagfactory` comm
 
 | Command   | Description                                                          |
 | --------- | -------------------------------------------------------------------- |
-| `lint`    | Validate dag-factory loader / YAML files (full build by default; `--schema-only` validates against the bundled schema instead) |
+| `lint`    | Validate dag-factory YAML configs (full build by default; `--schema-only` validates against the bundled schema instead) |
 | `convert` | Convert YAML file(s) from Airflow 2 to 3 in the terminal or in-place |
 
 For more details about the available commands, run `dagfactory --help`.
@@ -38,11 +38,12 @@ Validate DAG parameters end-to-end. The lint command accepts three input modes a
 
 | Input                | Example                                                  | What is validated                                                                                                                                |
 | -------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Python loader (`.py`) | `dagfactory lint dags/loader.py`                         | The loader is imported and every `load_yaml_dags(...)` invocation is captured. dag-factory's own defaults handling (defaults.yml chain, `defaults_config_dict`, etc.) runs end-to-end. |
 | YAML file (`.yml`/`.yaml`) | `dagfactory lint dags/my_dag.yml`                  | Each top-level DAG entry is validated as a self-contained config. The file's own `default:` block **and** the external `defaults.yml` chain are applied, by handing the file path to the same factory the runtime uses. Set the search root with `--defaults-path`; it defaults to Airflow's `dags_folder`. |
 | Inline YAML          | `dagfactory lint --yaml-content "$(cat my_dag.yml)"`     | Same semantics, supplied as a string. There is no file location to walk up from, so the external `defaults.yml` chain cannot be resolved; a DAG missing `start_date`/`tasks` is reported as a warning rather than an error. |
 
-When a directory is passed, the walker finds all `.py` files that import `dagfactory` and lints them. Files named `defaults.yml`/`defaults.yaml` are recognised as dag-factory infrastructure and skipped with a warning. Pass `--lint-yaml-in-dir` to also include `.yml`/`.yaml` files alongside the loaders, while this should be an uncommon case, as the .py files should cover all DAGs already. If a directory has YAML configs but no `.py` loaders and `--lint-yaml-in-dir` isn't passed, lint exits non-zero rather than silently checking nothing.
+When a directory is passed, every `.yml`/`.yaml` file under it is linted. Files named `defaults.yml`/`defaults.yaml` are dag-factory infrastructure rather than DAG configs, so they are not linted in their own right; their contents are still merged into the DAGs that inherit from them.
+
+Linting a Python loader is not supported. The loaders exist to call `load_yaml_dags(...)`; the configuration that can actually be wrong lives in the YAML, and the defaults chain those loaders used to be needed for is now resolved directly from the YAML's path.
 
 ### Validation strategies
 
@@ -53,10 +54,10 @@ When a directory is passed, the walker finds all `.py` files that import `dagfac
 
 ### Examples
 
-Lint a single Python loader (full build):
+Lint a single YAML config (full build):
 
 ```bash
-dagfactory lint dev/dags/airflow3/example_dag_factory.py
+dagfactory lint dev/dags/airflow3/example_dag_factory.yml
 ```
 
 Lint a YAML config against Airflow 2 (schema-only):
@@ -71,10 +72,16 @@ Lint inline YAML supplied from a script or editor:
 dagfactory lint --schema-only --yaml-content "$(cat my_dag.yml)"
 ```
 
-Lint everything under a folder, including the YAML files (Every DAG would be linted twice, one with .py file and the other one with YAML file):
+Lint every config under a folder:
 
 ```bash
-dagfactory lint --lint-yaml-in-dir dev/dags/airflow3
+dagfactory lint dev/dags/airflow3
+```
+
+Point the defaults search at a specific root, as dag-factory does at runtime:
+
+```bash
+dagfactory lint --defaults-path dev/dags dev/dags/example_dag_factory.yml
 ```
 
 ## Using the JSON schema in your IDE

@@ -2,15 +2,11 @@
 
 from __future__ import annotations
 
-import ast
 import datetime
-import importlib.util
-import sys
-import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional
 
 from jsonschema import Draft202012Validator, ValidationError, validators
 from packaging.version import InvalidVersion, Version
@@ -20,7 +16,6 @@ from dagfactory.constants import DEFAULTS_FILE_NAMES
 from dagfactory.dagbuilder import DagBuilder
 from dagfactory.dagfactory import SYSTEM_PARAMS, _DagFactory
 from dagfactory.schema import load_schema, satisfies_max_version, satisfies_min_version
-from dagfactory.utils import merge_configs
 
 
 @dataclass
@@ -193,31 +188,6 @@ def _is_defaults_satisfiable_requirement(error: ValidationError) -> bool:
     return False
 
 
-def imports_dagfactory(py_file_path: Path) -> bool:
-    """Return True if *py_file_path* imports anything from the ``dagfactory`` package.
-
-    Quick AST-only check — never executes user code. Used by lint to decide
-    whether a .py file is a dag-factory loader before attempting to import it.
-    """
-    try:
-        source = py_file_path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
-        return False
-    try:
-        tree = ast.parse(source, filename=str(py_file_path))
-    except SyntaxError:
-        return False
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom):
-            if (node.module or "").split(".")[0] == "dagfactory":
-                return True
-        elif isinstance(node, ast.Import):
-            for alias in node.names:
-                if alias.name.split(".")[0] == "dagfactory":
-                    return True
-    return False
-
-
 # ---------------------------------------------------------------------------
 # Loader interception (schema-only mode)
 # ---------------------------------------------------------------------------
@@ -246,7 +216,6 @@ class _LintDagBuilder(DagBuilder):
         return {"dag_id": self.dag_name, "dag": None}
 
 
-@contextmanager
 def _intercept_dag_factory() -> Iterator[List[_LintDagFactory]]:
     """Swap _DagFactory in its module; yield a list that captures every instantiation."""
     import dagfactory.dagfactory as df_module
@@ -286,7 +255,6 @@ def _intercept_dag_builder() -> Iterator[List[_LintDagBuilder]]:
         df_module.DagBuilder = original
 
 
-@contextmanager
 def _force_strict_mode() -> Iterator[None]:
     """Temporarily enable dagfactory.settings.strict_mode.
 
@@ -304,30 +272,6 @@ def _force_strict_mode() -> Iterator[None]:
         yield
     finally:
         df_settings.strict_mode = original
-
-
-def _import_loader(py_path: Path) -> Tuple[Optional[Any], Optional[Exception]]:
-    """Import *py_path* as a Python module. Returns ``(module, error_or_None)``.
-
-    Registered in ``sys.modules`` under a unique per-file name before
-    ``exec_module`` (and removed again afterwards) — otherwise loaders using
-    relative imports, dataclasses, or ``pickle`` fail to import (all of those
-    rely on the module being resolvable via ``sys.modules``), and reusing one
-    module name across files would let later files clobber earlier ones.
-    """
-    module_name = f"_dagfactory_lint_module_{uuid.uuid4().hex}"
-    spec = importlib.util.spec_from_file_location(module_name, py_path)
-    if spec is None or spec.loader is None:
-        return None, ImportError(f"Could not load Python module from {py_path}.")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    try:
-        spec.loader.exec_module(module)
-    except Exception as exc:
-        return None, exc
-    finally:
-        sys.modules.pop(module_name, None)
-    return module, None
 
 
 # ---------------------------------------------------------------------------
@@ -364,102 +308,6 @@ class DagParameterValidator:
     # ------------------------------------------------------------------
     # Entry points
     # ------------------------------------------------------------------
-    def validate_python_loader(self, py_file_path: Path) -> List[FileValidationResult]:
-        """Lint a Python loader file (one that calls ``load_yaml_dags``).
-
-        * schema_only=True → intercept dag-factory, capture merged configs,
-          validate against the JSON schema.
-        * schema_only=False → let dag-factory + Airflow build real DAGs;
-          surface any exception as a ValidationIssue.
-        """
-        py_file_path = py_file_path.resolve()
-        if not imports_dagfactory(py_file_path):
-            return [_make_result(py_file_path, "warning", "File does not import dagfactory; nothing to lint.")]
-
-        if not self.schema_only:
-            # Build mode: import the loader untouched, capture exceptions.
-            # Forced strict_mode makes a per-DAG build failure raise instead
-            # of being swallowed into build_dags()'s (dags, first_build_error).
-            result = FileValidationResult(file=py_file_path)
-            with _force_strict_mode():
-                module, exc = _import_loader(py_file_path)
-            if exc is not None:
-                result.issues.append(
-                    ValidationIssue(
-                        file=py_file_path,
-                        dag_id=None,
-                        severity="error",
-                        message=f"Failed to build DAGs: {type(exc).__name__}: {exc}",
-                    )
-                )
-                return [result]
-            if not self._find_dag_objects(module):
-                result.issues.append(
-                    ValidationIssue(
-                        file=py_file_path,
-                        dag_id=None,
-                        severity="warning",
-                        message="Loader imported successfully but no DAGs were built.",
-                    )
-                )
-            return [result]
-
-        # Schema mode: capture _DagFactory instantiations during import,
-        # then replay each through DagBuilder intercept to grab merged configs.
-        with _intercept_dag_factory() as factories:
-            _, exc = _import_loader(py_file_path)
-        if exc is not None:
-            return [
-                _make_result(
-                    py_file_path,
-                    "error",
-                    f"Failed to import {py_file_path.name}: {type(exc).__name__}: {exc}",
-                )
-            ]
-        if not factories:
-            return [
-                _make_result(
-                    py_file_path,
-                    "warning",
-                    "No dagfactory loader was invoked when importing this file.",
-                )
-            ]
-
-        results: List[FileValidationResult] = []
-        for factory in factories:
-            target = Path(factory.config_file_path) if factory.config_file_path else py_file_path
-            result = FileValidationResult(file=target)
-            with _intercept_dag_builder() as builders:
-                try:
-                    # build_dags() itself can still raise (e.g. malformed top-level
-                    # config); per-DAG build failures instead come back as
-                    # first_build_error, though _LintDagBuilder.build() never fails.
-                    _, first_build_error = factory.build_dags()
-                except Exception as exc:
-                    result.issues.append(
-                        ValidationIssue(
-                            file=target,
-                            dag_id=None,
-                            severity="error",
-                            message=f"dag-factory failed to build DAGs: {type(exc).__name__}: {exc}",
-                        )
-                    )
-                else:
-                    if first_build_error is not None:
-                        dag_name, exc = first_build_error
-                        result.issues.append(
-                            ValidationIssue(
-                                file=target,
-                                dag_id=dag_name,
-                                severity="error",
-                                message=f"dag-factory failed to build DAG: {type(exc).__name__}: {exc}",
-                            )
-                        )
-            for builder in builders:
-                merged = merge_configs(builder.dag_config, builder.default_config)
-                self._validate_dag(target, builder.dag_name, merged, result)
-            results.append(result)
-        return results
 
     def validate_yaml_file(self, yaml_file_path: Path) -> List[FileValidationResult]:
         """Lint a YAML file as a complete DAG config.
@@ -635,7 +483,6 @@ class DagParameterValidator:
             self._validate_dag(source, builder.dag_name, merged, result, defaults_unresolved=defaults_unresolved)
         return result
 
-    @staticmethod
     def _find_dag_objects(module) -> Dict[str, object]:
         """Collect any Airflow DAG instances registered in the module globals."""
         try:
