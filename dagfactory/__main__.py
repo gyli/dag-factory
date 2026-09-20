@@ -36,12 +36,17 @@ app = typer.Typer(
 
 def _check_yaml_syntax(file_path: Path):
     """
-    Check if the YAML file is valid.
+    Check if the YAML file can be loaded.
     """
     try:
         load_yaml_file(file_path)
     except yaml.YAMLError as e:
         return str(e)
+    except Exception as e:
+        # Loading also materialises `__type__` directives, so anything the
+        # import raises lands here. Report it rather than letting it escape
+        # and take the whole run down.
+        return f"{type(e).__name__}: {e}"
 
 
 def _find_yaml_files(path: Path) -> list[Path]:
@@ -153,6 +158,13 @@ def lint(
         help="Airflow version to check against (e.g. '3.1.2' or just '2'). "
         "Defaults to the installed Airflow version.",
     ),
+    check_operators: bool = typer.Option(
+        True,
+        "--check-operators/--no-check-operators",
+        help="Import each task's operator to confirm it exists. Turn it off to lint where the "
+        "provider packages are not installed. Other imports may still happen while resolving a "
+        "config, such as callables and `__type__` directives.",
+    ),
     defaults_path: Optional[Path] = typer.Option(
         None,
         "--defaults-path",
@@ -197,7 +209,12 @@ def lint(
             table.add_row(str(file_path), Text("Syntax Error", style="red"), Text(message, style="red"))
             continue
 
-        result = lint_file(file_path, target_version, str(defaults_path) if defaults_path else None)
+        result = lint_file(
+            file_path,
+            target_version,
+            str(defaults_path) if defaults_path else None,
+            check_operators=check_operators,
+        )
         if result.errors:
             total_errors += 1
             total_warnings += len(result.warnings)

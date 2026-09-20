@@ -178,3 +178,35 @@ class TestLintChecksTasks:
             if "is not an argument" in finding.message
         ]
         assert not spurious, spurious
+
+
+class TestOperatorImportIsOptional:
+    """--no-check-operators lets lint run where the providers are missing."""
+
+    MISSING = """
+my_dag:
+  start_date: 2024-01-01
+  tasks:
+    t:
+      operator: airflow.providers.nowhere.operators.thing.ThingOperator
+      sql: select 1
+"""
+
+    def test_an_uninstalled_provider_is_an_error_by_default(self, tmp_path):
+        result = lint_file(_write(tmp_path, "dag.yml", self.MISSING), AF3, str(tmp_path))
+        assert any("Cannot import" in f.message for f in result.errors)
+
+    def test_it_is_not_reported_when_the_import_is_skipped(self, tmp_path):
+        result = lint_file(_write(tmp_path, "dag.yml", self.MISSING), AF3, str(tmp_path), check_operators=False)
+        assert not result.findings, [f.render() for f in result.findings]
+
+    def test_a_task_must_still_name_an_operator(self, tmp_path):
+        """Declaring one is structural, so it is checked either way."""
+        text = "my_dag:\n  start_date: 2024-01-01\n  tasks:\n    t:\n      bash_command: echo\n"
+        result = lint_file(_write(tmp_path, "dag.yml", text), AF3, str(tmp_path), check_operators=False)
+        assert any("operator" in f.message and "decorator" in f.message for f in result.errors)
+
+    def test_other_checks_still_run(self, tmp_path):
+        text = self.MISSING + "  catchup: notabool\n"
+        result = lint_file(_write(tmp_path, "dag.yml", text), AF3, str(tmp_path), check_operators=False)
+        assert any("catchup" in f.message for f in result.errors)

@@ -462,21 +462,29 @@ def check_for_build(config: Dict[str, Any], airflow_version: Version) -> List[Tu
     return findings
 
 
-def check_for_lint(config: Dict[str, Any], airflow_version: Version) -> List[Tuple[str, str, str]]:
+def check_for_lint(
+    config: Dict[str, Any], airflow_version: Version, check_operators: bool = True
+) -> List[Tuple[str, str, str]]:
     """Everything ``dagfactory lint`` reports.
 
     Lint never builds, so it has to cover the ground Airflow would otherwise
     cover at build time: the shape of ``default_args`` values, and every
     task-level problem.
+
+    *check_operators* imports each task's operator to confirm it exists. Turn
+    it off to lint in an environment that does not have every provider
+    installed.
     """
     findings = check(config, airflow_version)
     default_args = config.get("default_args")
     if isinstance(default_args, dict):
         findings += _under("default_args", check(default_args, airflow_version, scope="default_args"))
-    return findings + check_tasks(config, airflow_version)
+    return findings + check_tasks(config, airflow_version, check_operators=check_operators)
 
 
-def check_tasks(config: Dict[str, Any], airflow_version: Version) -> List[Tuple[str, str, str]]:
+def check_tasks(
+    config: Dict[str, Any], airflow_version: Version, check_operators: bool = True
+) -> List[Tuple[str, str, str]]:
     """Check each task's own parameters, and how the tasks fit together.
 
     Called by ``dagfactory lint`` only. Building a DAG surfaces all of this
@@ -504,7 +512,7 @@ def check_tasks(config: Dict[str, Any], airflow_version: Version) -> List[Tuple[
             continue
 
         prefix = f"tasks.{task_id}"
-        _check_importable(task, prefix, findings)
+        _check_operator(task, prefix, findings, check_operators)
         findings += _under(prefix, check(task, airflow_version, scope="task", report_unknown=False))
 
         for upstream in task.get("dependencies") or []:
@@ -517,16 +525,20 @@ def check_tasks(config: Dict[str, Any], airflow_version: Version) -> List[Tuple[
     return findings
 
 
-def _check_importable(task: Dict[str, Any], prefix: str, findings: List[Tuple[str, str, str]]) -> None:
-    """Report a task whose operator or decorator cannot be imported."""
-    from dagfactory.utils import import_string
+def _check_operator(task: Dict[str, Any], prefix: str, findings: List[Tuple[str, str, str]], do_import: bool) -> None:
+    """Check a task names an operator, and optionally that it can be imported.
 
+    Declaring one is structural and always checked. Importing it needs the
+    provider installed, which the caller may not want to require.
+    """
     target = task.get("operator") or task.get("decorator")
     if not target:
         findings.append((ERROR, prefix, "A task must define either `operator` or `decorator`."))
         return
-    if not isinstance(target, str):
+    if not do_import or not isinstance(target, str):
         return
+
+    from dagfactory.utils import import_string
 
     try:
         import_string(target)

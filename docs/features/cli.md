@@ -92,6 +92,12 @@ an Airflow 2 deployment can be checked from an Airflow 3 environment.
 `--defaults-path` sets the root to search for `defaults.yml`, as dag-factory
 does at runtime; it defaults to Airflow's `dags_folder`.
 
+`--no-check-operators` skips importing each task's operator, for linting
+somewhere the provider packages are not installed. It does not make lint
+entirely independent of the environment: loading a config still materialises
+any `__type__` directives, and resolving one still imports callables, so a
+config that reaches for a missing module is reported either way.
+
 Files named `defaults.yml` / `defaults.yaml` are dag-factory infrastructure
 rather than DAG configs, so they are not linted in their own right. A YAML file
 that defines no DAGs is left alone too.

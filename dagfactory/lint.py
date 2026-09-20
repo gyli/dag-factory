@@ -102,8 +102,13 @@ def lint_file(
     yaml_file: Path,
     airflow_version: Version,
     defaults_config_path: Optional[str] = None,
+    check_operators: bool = True,
 ) -> FileResult:
-    """Resolve every DAG in *yaml_file* and check it against the metadata."""
+    """Resolve every DAG in *yaml_file* and check it against the metadata.
+
+    *check_operators* imports each task's operator to confirm it exists. Turn
+    it off when linting somewhere the providers are not installed.
+    """
     result = FileResult(file=yaml_file)
 
     # A YAML file that defines no DAGs is not a dag-factory config — a fragment,
@@ -140,7 +145,9 @@ def lint_file(
                 )
             )
             continue
-        for severity, path, message in parameters.check_for_lint(config, airflow_version):
+        for severity, path, message in parameters.check_for_lint(
+            config, airflow_version, check_operators=check_operators
+        ):
             result.findings.append(Finding(yaml_file, builder.dag_name, severity, message, path))
 
     return result
