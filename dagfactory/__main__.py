@@ -12,8 +12,9 @@ from rich.text import Text
 
 from dagfactory import __version__
 from dagfactory._yaml import load_yaml_file
+from dagfactory.constants import DEFAULTS_FILE_NAMES
 from dagfactory.utils import update_yaml_structure
-from dagfactory.validator import DagParameterValidator, imports_dagfactory
+from dagfactory.validator import DagParameterValidator
 
 DESCRIPTION = """
 [bold][medium_purple3]DAG Factory[/medium_purple3][/bold]: Dynamically build Apache Airflow DAGs from YAML files
@@ -32,64 +33,30 @@ app = typer.Typer(
 )
 
 
-def _find_lintable_files(path: Path, lint_yaml_in_dir: bool = False) -> list[Path]:
-    """Find files lint can process under *path*.
+def _find_lintable_files(path: Path) -> list[Path]:
+    """Find the YAML configs lint can process under *path*.
 
-    For a single file target, it's lintable if the file suffix is .py or .yml/.yaml.
-
-    For a directory target, .py loaders are always discovered. YAML files
-    are only included when lint_yaml_in_dir is True.
+    Files named ``defaults.yml``/``defaults.yaml`` are dag-factory
+    infrastructure rather than DAG configs, and are left out.
     """
     if not path.exists():
         console.print(f"[red]Error:[/red] Path '{path}' does not exist.")
         raise typer.Exit(1)
 
     if path.is_dir():
-        py_candidates = list(path.rglob("*.py"))
-        py_loaders = [p for p in py_candidates if imports_dagfactory(p)]
-        if lint_yaml_in_dir:
-            yaml_files = list(path.rglob("*.yml")) + list(path.rglob("*.yaml"))
-            files = py_loaders + yaml_files
-        else:
-            files = py_loaders
+        candidates = sorted(list(path.rglob("*.yml")) + list(path.rglob("*.yaml")))
+        files = [p for p in candidates if p.name not in DEFAULTS_FILE_NAMES]
         if not files:
-            if not lint_yaml_in_dir:
-                skipped_yaml = list(path.rglob("*.yml")) + list(path.rglob("*.yaml"))
-                if skipped_yaml:
-                    # Directory has YAML configs but no .py loaders — without
-                    # --lint-yaml-in-dir nothing would actually get checked, which
-                    # would make a CI lint step silently pass on unvalidated YAML.
-                    console.print(
-                        f"[red]Error:[/red] '{path}' has {len(skipped_yaml)} YAML "
-                        f"{_file_or_files(len(skipped_yaml))} but no .py loaders "
-                        f"({len(py_candidates)} .py file(s) scanned; none import dagfactory). "
-                        "Pass --lint-yaml-in-dir to lint them."
-                    )
-                    raise typer.Exit(1)
-            extra = "" if lint_yaml_in_dir else " (pass --lint-yaml-in-dir to also include .yml/.yaml files)"
-            console.print(
-                f"[yellow]No lintable files found in '{path}' "
-                f"({len(py_candidates)} .py file(s) scanned; none import dagfactory).{extra}[/yellow]"
-            )
+            skipped = len(candidates) - len(files)
+            note = f" ({skipped} defaults file(s) skipped)" if skipped else ""
+            console.print(f"[yellow]No YAML configs found in '{path}'{note}.[/yellow]")
             raise typer.Exit()
         return files
 
-    if path.suffix == ".py":
-        if not imports_dagfactory(path):
-            console.print(
-                f"[yellow]'{path}' does not import dagfactory; skipping (not a loader file).[/yellow]"
-            )
-            raise typer.Exit()
-        return [path]
-
-    if path.suffix in (".yml", ".yaml"):
-        return [path]
-
-    console.print(
-        f"[red]Error:[/red] lint operates on .py loader files or .yml/.yaml configs; "
-        f"got '{path.suffix}'."
-    )
-    raise typer.Exit(1)
+    if path.suffix not in (".yml", ".yaml"):
+        console.print(f"[red]Error:[/red] '{path}' is not a YAML config. " "lint checks .yml/.yaml files.")
+        raise typer.Exit(1)
+    return [path]
 
 
 def _find_yaml_files(path: Path) -> list[Path]:
@@ -191,14 +158,22 @@ def main(
 def lint(
     path: Optional[Path] = typer.Argument(
         None,
-        help="Path to a Python loader (.py) file, a YAML config (.yml/.yaml) file, "
-        "or a directory containing either. External defaults are not supported when linting YAML files.",
+        help=(
+            "Path to a YAML config (.yml/.yaml) or a directory of them. The defaults.yml "
+            "chain is resolved by walking up from the file, as dag-factory does at runtime."
+        ),
     ),
     yaml_content: Optional[str] = typer.Option(
         None,
         "--yaml-content",
         "-c",
-        help="Inline YAML content to validate (mutually exclusive with the path argument).",
+        help=(
+            "Inline YAML to validate, as a complete DAG config: one or more top-level DAG "
+            "entries, with everything they need to build. Mutually exclusive with the path "
+            "argument. A string has no location on disk, so the defaults.yml chain cannot be "
+            "walked up from it; pass --defaults-path to supply one, or anything inherited "
+            "from defaults will be reported as missing."
+        ),
     ),
     airflow_version: str = typer.Option(
         AIRFLOW_VERSION,
@@ -213,16 +188,23 @@ def lint(
         help="Validate only against the bundled JSON schema; do not build real Airflow DAGs. "
         "Useful when not every operator package referenced in the YAML is installed.",
     ),
-    lint_yaml_in_dir: bool = typer.Option(
-        False,
-        "--lint-yaml-in-dir",
-        help="When the path argument is a directory, also lint .yml/.yaml files alongside .py "
-        "loaders. No effect on single-file or --yaml-content invocations.",
+    defaults_path: Optional[Path] = typer.Option(
+        None,
+        "--defaults-path",
+        help=(
+            "Root directory to search for defaults.yml/defaults.yaml, as dag-factory does at "
+            "runtime. Defaults to Airflow's dags_folder. Required with --yaml-content when the "
+            "config inherits anything from a defaults file."
+        ),
     ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show full error messages"),
     ignore: Path = typer.Option(None, "--ignore", "-i", help="Files or directories to ignore"),
 ):
-    """Validate dag-factory loaders and YAML configs.
+    """Validate dag-factory YAML configs.
+
+    Takes a YAML config or a directory of them. Files named defaults.yml /
+    defaults.yaml are dag-factory infrastructure and are skipped, though their
+    contents are still merged into the DAGs that inherit from them.
 
     Default (build mode) runs the full dag-factory + Airflow build pipeline and reports
     any exception (operator typos, dependency cycles, schedule conflicts, etc.).
@@ -230,9 +212,7 @@ def lint(
     and works without every operator package installed.
     """
     if (path is None) == (yaml_content is None):
-        console.print(
-            "[red]Error:[/red] provide either a path argument or --yaml-content (not both)."
-        )
+        console.print("[red]Error:[/red] provide either a path argument or --yaml-content (not both).")
         raise typer.Exit(1)
 
     table = Table(
@@ -244,7 +224,11 @@ def lint(
     table.add_column("Error Message", style="red", no_wrap=False, overflow="fold")
 
     try:
-        validator = DagParameterValidator(airflow_version=airflow_version, schema_only=schema_only)
+        validator = DagParameterValidator(
+            airflow_version=airflow_version,
+            schema_only=schema_only,
+            defaults_config_path=str(defaults_path) if defaults_path else None,
+        )
     except ValueError as exc:
         console.print(f"[red]Error:[/red] {exc}")
         raise typer.Exit(2)
@@ -281,15 +265,12 @@ def lint(
         render_results(label_prefix=None, results=results)
         analysed = 1
     else:
-        files = _find_lintable_files(path, lint_yaml_in_dir=lint_yaml_in_dir)
+        files = _find_lintable_files(path)
         if ignore:
             airflow_ignore_files = _find_yaml_files_on_airflow_ignore(path)
             _exclude_yaml_files(files, ignore, airflow_ignore_files)
         for file_path in files:
-            if file_path.suffix == ".py":
-                results = validator.validate_python_loader(file_path)
-            else:  # .yml / .yaml
-                results = validator.validate_yaml_file(file_path)
+            results = validator.validate_yaml_file(file_path)
             render_results(label_prefix=str(file_path), results=results)
         analysed = len(files)
 
@@ -304,9 +285,7 @@ def lint(
             console.print("For more details on the errors, run with --verbose.")
         raise typer.Exit(1)
     if total_warnings:
-        console.print(
-            f"{summary}, [green]no errors[/green], [yellow]{total_warnings}[/yellow] warning(s)."
-        )
+        console.print(f"{summary}, [green]no errors[/green], [yellow]{total_warnings}[/yellow] warning(s).")
         return
     console.print(f"{summary}, [green]no errors found.[/green]")
 

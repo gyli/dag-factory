@@ -49,7 +49,7 @@ When a directory is passed, the walker finds all `.py` files that import `dagfac
 | Strategy                       | Behaviour                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Build mode (default)**       | Runs the full dag-factory + Airflow pipeline. Catches operator typos, missing required args, dependency cycles, conflicting schedules, bad date strings — anything that would fail at DAG-build time. Requires every operator package referenced in the YAML to be importable in the lint environment.                                                                                                                                                              |
-| **Schema mode (`--schema-only`)** | Intercepts dag-factory before any DAG is built and validates the resolved configs against the bundled JSON schema. Cheaper and runs cleanly in environments that don't have every operator installed. Detects schema-level issues only: removed-in-AF3 fields, deprecated parameters, missing required fields, type mismatches, etc.                                                                                                                                  |
+| **Metadata mode (`--schema-only`)** | Intercepts dag-factory before any DAG is built and checks the resolved configs against `PARAM_METADATA`. Cheaper and runs cleanly in environments that don't have every operator installed. Detects table-level issues only: removed-in-AF3 fields, deprecated parameters, missing required fields, type mismatches, unknown keys, etc.                                                                                                                                  |
 
 ### Examples
 
@@ -77,38 +77,48 @@ Lint everything under a folder, including the YAML files (Every DAG would be lin
 dagfactory lint --lint-yaml-in-dir dev/dags/airflow3
 ```
 
-## Using the JSON schema in your IDE
+## One table, two consumers
 
-The JSON schema that powers `dagfactory lint --schema-only` is bundled as a regular JSON file and can be wired into any editor that supports JSON Schema for YAML validation (VS Code via the YAML extension, JetBrains IDEs natively, Neovim with `yaml-language-server`, etc.). This gives you interactive feedback on dag-factory YAML files while you type — no Python toolchain in the loop.
+`dagfactory/parameters.py` holds a single dict, `PARAM_METADATA`, describing
+every configuration key dag-factory accepts: its types, the Airflow versions it
+applies to, whether it is deprecated, and whether dag-factory forwards it.
+Both consumers read it, so their rules cannot drift apart:
 
-The schema lives at `dagfactory/schemas/dag_parameters.json` in the installed package. To find its absolute path on your machine:
+- `dagfactory lint` renders `parameters.check()` findings as diagnostics.
+- `DagBuilder.build()` calls the same `check()` on every resolved config before
+  constructing the DAG, and decides from the same table which keys reach the
+  `DAG` constructor.
 
-```bash
-python -c "from importlib.resources import files; print(files('dagfactory.schemas') / 'dag_parameters.json')"
+Version ranges are the half-open interval `[min_version, max_version)`, written
+as PEP 440 strings. The upper bound is exclusive, so `"3.0.0"` reads as "gone in
+3.0" with no ambiguity about how many components were written.
+
+The table also holds what a JSON document could not: `transform` is a Python
+callable applied to a value before it reaches Airflow.
+
+### Validation while building
+
+Validation runs on each DAG's fully resolved config — after `defaults.yml` and
+the `default:` block are merged — and before the `DAG` is created. Findings are
+logged: warnings as warnings, errors as errors. The DAG is still built, so a
+stale entry cannot take a deployment down.
+
+```ini
+[dag_factory]
+strict_mode = True        # a validation error stops the build
+validate_on_build = False # skip validation entirely
 ```
 
-### VS Code (YAML extension)
+A parameter the installed Airflow does not accept is dropped with a warning
+rather than passed through. That is a change in behaviour: previously
+`timetable` on Airflow 3 reached `DAG()` and raised
+`TypeError: DAG.__init__() got an unexpected keyword argument 'timetable'`, so
+the DAG did not appear at all.
 
-Add to `.vscode/settings.json`:
+### No IDE integration
 
-```json
-{
-  "yaml.schemas": {
-    "/absolute/path/to/dagfactory/schemas/dag_parameters.json": [
-      "dags/**/*.yml",
-      "dags/**/*.yaml"
-    ]
-  }
-}
-```
-
-### JetBrains IDEs (PyCharm, IntelliJ, etc.)
-
-Settings → Languages & Frameworks → Schemas and DTDs → JSON Schema Mappings → add a mapping from the schema file to your DAG YAML directory.
-
-### Notes on standalone use
-
-The standalone schema validates the static structure of a YAML file: required fields, value types, removed/deprecated parameters, and dag-factory-specific conventions. It does **not** apply external defaults (`defaults.yml`, `defaults_config_dict`) or run dag-factory's loader, so cross-file constraints and operator-import errors are only caught by `dagfactory lint`.
+This approach has no JSON Schema file, so editors cannot validate dag-factory
+YAML as you type. Feedback comes from `dagfactory lint` only.
 
 ## `convert`  command
 

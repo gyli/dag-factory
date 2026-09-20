@@ -34,7 +34,6 @@ dependencies = [
     "pyyaml",
     "packaging",
     "typer",
-    "jsonschema>=4.0",
 ]
 
 [project.scripts]

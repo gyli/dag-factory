@@ -19,3 +19,7 @@ enable_telemetry = conf.getboolean("dag_factory", "enable_telemetry", fallback=T
 do_not_track = convert_to_boolean(os.getenv("DO_NOT_TRACK"))
 no_analytics = convert_to_boolean(os.getenv("SCARF_NO_ANALYTICS"))
 strict_mode = conf.getboolean("dag_factory", "strict_mode", fallback=False)
+
+# Validate each resolved DAG config against the parameter metadata while
+# building. Findings are logged; set strict_mode to turn errors fatal.
+validate_on_build = conf.getboolean("dag_factory", "validate_on_build", fallback=True)
