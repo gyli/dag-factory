@@ -185,7 +185,7 @@ def lint(
     schema_only: bool = typer.Option(
         False,
         "--schema-only",
-        help="Validate only against the bundled JSON schema; do not build real Airflow DAGs. "
+        help="Check configs against the parameter metadata only; do not build real Airflow DAGs. "
         "Useful when not every operator package referenced in the YAML is installed.",
     ),
     defaults_path: Optional[Path] = typer.Option(
@@ -208,7 +208,7 @@ def lint(
 
     Default (build mode) runs the full dag-factory + Airflow build pipeline and reports
     any exception (operator typos, dependency cycles, schedule conflicts, etc.).
-    Pass --schema-only to validate against the bundled JSON schema instead — cheaper,
+    Pass --schema-only to check against the parameter metadata instead — cheaper,
     and works without every operator package installed.
     """
     if (path is None) == (yaml_content is None):

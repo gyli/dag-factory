@@ -148,7 +148,7 @@ def _force_strict_mode() -> Iterator[None]:
 # Validator
 # ---------------------------------------------------------------------------
 class DagParameterValidator:
-    """Validate DAG Factory YAML files against the bundled JSON schema."""
+    """Validate DAG Factory YAML configs against :data:`dagfactory.parameters.PARAM_METADATA`."""
 
     def __init__(
         self,
