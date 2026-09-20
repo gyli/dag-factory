@@ -4,10 +4,10 @@ After installing DAG Factory, the CLI can be invoked using the `dagfactory` comm
 
 ## Commands summary
 
-| Command    | Args   | Flags        | Description                                                          |
-| ---------- | ------ | ------------ | -------------------------------------------------------------------- |
-| `lint`     | `path` | `--verbose`  | Check if the given directory or file is a valid YAML                 |
-| `convert`  | `path` | `--override` | Convert YAML file(s) from Airflow 2 to 3 in the terminal or in-place |
+| Command   | Description                                                          |
+| --------- | -------------------------------------------------------------------- |
+| `lint`    | Validate dag-factory YAML configs (full build by default; `--schema-only` validates against the bundled schema instead) |
+| `convert` | Convert YAML file(s) from Airflow 2 to 3 in the terminal or in-place |
 
 For more details about the available commands, run `dagfactory --help`.
 
@@ -26,73 +26,152 @@ dagfactory [OPTIONS]
 
 #### Identify the CLI version
 
-Display the DAG Factory version (both the CLI and the library share the same version number):
-
 ```bash
 dagfactory --version
 ```
 
-Output:
-
-```bash
-DAG Factory 1.0.0a1
-```
-
-#### Check all the commands available in the CLI
-
-Find out more about the DAG Factory command line:
-
-```bash
-dagfactory --help
-```
-
-Output:
-
-```bash
-Usage: dagfactory [OPTIONS]
-
-DAG Factory: Dynamically build Apache Airflow DAGs from YAML files
-
-Options:
-  -v, --version  Show the version and exit.
-  -h, --help     Show this message and exit.
-```
-
 ## `lint` command
 
-Check if the given directory contains a valid YAML files (recursively) or if the given file is a valid YAML.
+Validate DAG parameters end-to-end. The lint command accepts three input modes and two validation strategies.
 
-### Example
+### Input modes
+
+| Input                | Example                                                  | What is validated                                                                                                                                |
+| -------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| YAML file (`.yml`/`.yaml`) | `dagfactory lint dags/my_dag.yml`                  | Each top-level DAG entry is validated as a self-contained config. The file's own `default:` block **and** the external `defaults.yml` chain are applied, by handing the file path to the same factory the runtime uses. Set the search root with `--defaults-path`; it defaults to Airflow's `dags_folder`. |
+| Inline YAML          | `dagfactory lint --yaml-content "$(cat my_dag.yml)"`     | The string must be a **complete DAG config**: one or more top-level DAG entries with everything they need to build. A string has no location on disk, so the `defaults.yml` chain cannot be walked up from it — pass `--defaults-path` to give it a root, or anything inherited from defaults is reported as missing. |
+
+When a directory is passed, every `.yml`/`.yaml` file under it is linted. Files named `defaults.yml`/`defaults.yaml` are dag-factory infrastructure rather than DAG configs, so they are not linted in their own right; their contents are still merged into the DAGs that inherit from them.
+
+Linting a Python loader is not supported. The loaders exist to call `load_yaml_dags(...)`; the configuration that can actually be wrong lives in the YAML, and the defaults chain those loaders used to be needed for is now resolved directly from the YAML's path.
+
+Nothing is softened. Whatever the validator is handed is what it checks, so a
+`start_date` that no resolved `defaults.yml` supplies is an error rather than a
+warning. If a config legitimately inherits one, point `--defaults-path` at the
+root that holds it.
+
+### Validation strategies
+
+| Strategy                       | Behaviour                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Build mode (default)**       | Runs the full dag-factory + Airflow pipeline. Catches operator typos, missing required args, dependency cycles, conflicting schedules, bad date strings — anything that would fail at DAG-build time. Requires every operator package referenced in the YAML to be importable in the lint environment.                                                                                                                                                              |
+| **Schema mode (`--schema-only`)** | Intercepts dag-factory before any DAG is built and validates the resolved configs against the bundled JSON schema. Cheaper and runs cleanly in environments that don't have every operator installed. Detects schema-level issues only: removed-in-AF3 fields, deprecated parameters, missing required fields, type mismatches, etc.                                                                                                                                  |
+
+### Examples
+
+Lint a single YAML config (full build):
 
 ```bash
- dagfactory lint some/dir --verbose
+dagfactory lint dev/dags/airflow3/example_dag_factory.yml
 ```
 
-Output:
+Lint a YAML config against Airflow 2 (schema-only):
 
 ```bash
-                           DAG Factory: YAML Lint Results
-┏━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ File                 ┃ Status       ┃ Error Message                               ┃
-┡━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ some/dir/v.yml       │ OK           │                                             │
-├──────────────────────┼────────------┼---------------------------------────────────┤
-│ some/dir/b.yaml      │ Syntax Error │ mapping values are not allowed here         │
-│                      │              │   in "<unicode string>", line 2, column 7:  │
-│                      │              │       host: localhost                       │
-│                      │              │           ^                                 │
-├──────────────────────┼──────────────┼─────────────────────────────────────────────┤
-│ some/dir/a.yml       │ Syntax Error │ while parsing a flow sequence               │
-│                      │              │   in "<unicode string>", line 2, column 5:  │
-│                      │              │       - [orange, mango                      │
-│                      │              │         ^                                   │
-│                      │              │ expected ',' or ']', but got '<stream end>' │
-│                      │              │   in "<unicode string>", line 3, column 1:  │
-│                      │              │                                             │
-│                      │              │     ^                                       │
-└──────────────────────┴──────────────┴─────────────────────────────────────────────┘
-Analysed 3 files, found 2 invalid YAML files.
+dagfactory lint --schema-only --airflow-version 2 dev/dags/airflow2/example_params.yml
 ```
+
+Lint inline YAML supplied from a script or editor, with a defaults root so
+inherited values resolve:
+
+```bash
+dagfactory lint --schema-only --defaults-path dags/ --yaml-content "$(cat my_dag.yml)"
+```
+
+Lint every config under a folder:
+
+```bash
+dagfactory lint dev/dags/airflow3
+```
+
+Point the defaults search at a specific root, as dag-factory does at runtime:
+
+```bash
+dagfactory lint --defaults-path dev/dags dev/dags/example_dag_factory.yml
+```
+
+## Using the JSON schema in your IDE
+
+The JSON schema that powers `dagfactory lint --schema-only` is bundled as a regular JSON file and can be wired into any editor that supports JSON Schema for YAML validation (VS Code via the YAML extension, JetBrains IDEs natively, Neovim with `yaml-language-server`, etc.). This gives you interactive feedback on dag-factory YAML files while you type — no Python toolchain in the loop.
+
+The schema lives at `dagfactory/schemas/dag_parameters.json` in the installed package. To find its absolute path on your machine:
+
+```bash
+python -c "from importlib.resources import files; print(files('dagfactory.schemas') / 'dag_parameters.json')"
+```
+
+### VS Code (YAML extension)
+
+Add to `.vscode/settings.json`:
+
+```json
+{
+  "yaml.schemas": {
+    "/absolute/path/to/dagfactory/schemas/dag_parameters.json": [
+      "dags/**/*.yml",
+      "dags/**/*.yaml"
+    ]
+  }
+}
+```
+
+### JetBrains IDEs (PyCharm, IntelliJ, etc.)
+
+Settings → Languages & Frameworks → Schemas and DTDs → JSON Schema Mappings → add a mapping from the schema file to your DAG YAML directory.
+
+### Notes on standalone use
+
+The standalone schema validates the static structure of a YAML file: required fields, value types, removed/deprecated parameters, and dag-factory-specific conventions. Used directly by an editor it cannot apply external defaults or run dag-factory's loader, so cross-file constraints and operator-import errors are only caught by `dagfactory lint`.
+
+## One schema, two consumers
+
+`dagfactory/schemas/dag_parameters.json` is hand maintained and is the only
+description of the configuration dag-factory accepts. Both the linter and the
+DAG builder read it, so the rules cannot drift apart:
+
+- `dagfactory lint` reports its findings as errors and warnings.
+- `DagBuilder.build()` validates every resolved config against the same schema,
+  through the same code path, before constructing the DAG. It also decides from
+  the schema which keys reach the `DAG` constructor, which Airflow versions
+  accept them, and which are deprecated aliases.
+
+A parameter's Airflow version range is therefore stated once. `x-airflow-min-version`
+is read at the precision it is written (`"3"` means any Airflow 3, `"2.9"` means
+2.9 or later) and `x-airflow-max-version` is inclusive in the same way. Both the
+lint keywords and the builder call the same predicates in `dagfactory/schema.py`.
+
+The one thing the schema cannot express is Python. A few values need a callable
+applied before they reach Airflow; those live in `TRANSFORMS` in
+`dagfactory/schema.py`, keyed by the same property names, and a test asserts
+every key is a property the schema declares.
+
+### Validation while building
+
+Validation runs on each DAG's fully resolved config — after `defaults.yml` and
+the `default:` block are merged — and before the `DAG` object is created.
+Findings are logged: warnings as warnings, errors as errors. The DAG is still
+built, so a stale annotation cannot take a deployment down.
+
+Set `strict_mode` to make a schema error stop the build instead:
+
+```ini
+[dag_factory]
+strict_mode = True
+```
+
+To turn build-time validation off entirely:
+
+```ini
+[dag_factory]
+validate_on_build = False
+```
+
+A parameter the installed Airflow no longer accepts is dropped with a warning
+rather than passed through. That is a change in behaviour: previously
+`timetable` on Airflow 3 reached `DAG()` and raised
+`TypeError: DAG.__init__() got an unexpected keyword argument 'timetable'`,
+so the DAG did not appear at all. It now builds without the unsupported
+parameter. Use `strict_mode` if you would rather the DAG fail loudly.
 
 ## `convert`  command
 
@@ -108,9 +187,6 @@ Output:
 
 ```bash
 No changes needed: dev/dags/airflow3/example_params.yml
-No changes needed: dev/dags/airflow3/example_dag_factory_multiple_config.yml
-No changes needed: dev/dags/airflow3/example_task_group.yml
-No changes needed: dev/dags/airflow3/example_dag_factory_default_args.yml
 ─────────────────────────────────────────────────── Diff for dev/dags/airflow3/example_customize_operator.yml ───────────────────────────────────────────────────
 --- dev/dags/airflow3/example_customize_operator.yml
 +++ dev/dags/airflow3/example_customize_operator.yml (converted)
@@ -120,22 +196,5 @@ No changes needed: dev/dags/airflow3/example_dag_factory_default_args.yml
    - task_id: begin
 -    operator: airflow.operators.empty.EmptyOperator
 +    operator: airflow.providers.standard.operators.empty.EmptyOperator
-   - task_id: make_bread_1
-     operator: customized.operators.breakfast_operators.MakeBreadOperator
-     bread_type: Sourdough
-@@ -30,7 +30,7 @@
-     - make_bread_1
-     - make_bread_2
-   - task_id: end
--    operator: airflow.operators.empty.EmptyOperator
-+    operator: airflow.providers.standard.operators.empty.EmptyOperator
-     dependencies:
-     - begin
-     - make_bread_1
-No changes needed: dev/dags/airflow3/example_custom_py_object_dag.yml
-No changes needed: dev/dags/airflow3/example_taskflow.yml
-No changes needed: dev/dags/airflow3/example_jinja2_template_dag.yml
-No changes needed: dev/dags/airflow3/example_dag_factory_default_config.yml
-No changes needed: dev/dags/airflow3/example_dynamic_task_mapping.yml
 Tried to convert 10 files, converted 1 file, no errors found.
 ```

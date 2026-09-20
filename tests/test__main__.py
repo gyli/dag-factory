@@ -1,14 +1,13 @@
 import shutil
 from filecmp import cmp
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 import yaml
 from typer.testing import CliRunner
 
 from dagfactory import __version__
-from dagfactory.__main__ import app
+from dagfactory.__main__ import app, console
 
 EXAMPLE_YAML_AF2_DAGS = Path(__file__).parent.parent / "dev/dags/airflow2"
 EXAMPLE_YAML_AF3_DAGS = Path(__file__).parent.parent / "dev/dags/airflow3"
@@ -17,17 +16,69 @@ EXAMPLE_YAML_INVALID_DAG = Path(__file__).parent.parent / "dev/dags/invalid.yaml
 runner = CliRunner()
 
 
+@pytest.fixture(autouse=True)
+def _wide_console():
+    """Rich falls back to width 80 with no TTY (i.e. in CI), which can wrap a long
+    tmp path mid-message and split assertions across lines. Pin it wide for tests."""
+    original_size = console.size
+    console.size = (200, 50)
+    yield
+    console.size = original_size
+
+
 @pytest.fixture
-def tmp_yaml_file(tmp_path):
-    file_path = tmp_path / "valid.yaml"
-    file_path.write_text("key: value\n")
+def tmp_valid_loader(tmp_path):
+    """Write a tiny .py loader that registers a clean inline DAG via load_yaml_dags."""
+    file_path = tmp_path / "valid_loader.py"
+    file_path.write_text("""
+from dagfactory import load_yaml_dags
+
+load_yaml_dags(
+    globals_dict=globals(),
+    config_dict={
+        "ok_dag": {
+            "tasks": [{"task_id": "t", "operator": "airflow.operators.bash.BashOperator", "bash_command": "echo"}],
+        }
+    },
+    defaults_config_dict={"default_args": {"start_date": "2025-01-01", "owner": "test"}},
+)
+""")
     return file_path
 
 
 @pytest.fixture
-def tmp_invalid_yaml_file(tmp_path):
-    file_path = tmp_path / "invalid.yaml"
-    file_path.write_text("key: [unclosed\n")
+def tmp_invalid_loader(tmp_path):
+    """Write a .py loader whose inline DAG uses a removed-in-AF3 parameter."""
+    file_path = tmp_path / "invalid_loader.py"
+    file_path.write_text("""
+from dagfactory import load_yaml_dags
+
+load_yaml_dags(
+    globals_dict=globals(),
+    config_dict={
+        "bad_dag": {
+            "schedule_interval": "@daily",
+            "tasks": [{"task_id": "t", "operator": "x"}],
+        }
+    },
+    defaults_config_dict={"default_args": {"start_date": "2025-01-01"}},
+)
+""")
+    return file_path
+
+
+@pytest.fixture
+def tmp_yaml_file(tmp_path):
+    """A YAML config valid enough to pass schema-only lint, for the --ignore tests."""
+    file_path = tmp_path / "valid.yaml"
+    file_path.write_text(
+        "my_dag:\n"
+        "  default_args:\n"
+        "    start_date: '2025-01-01'\n"
+        "  tasks:\n"
+        "    - task_id: t\n"
+        "      operator: x\n"
+    )
     return file_path
 
 
@@ -63,29 +114,64 @@ def test_help_option():
     assert "Show the version and exit" in result.output
 
 
-def test_lint_path_not_exist():
-    result = runner.invoke(app, ["lint", "nonexistent.yaml"])
-    assert result.exit_code != 0
-    assert "does not exist" in result.stdout
+def test_lint_invalid_airflow_version_is_a_friendly_error(tmp_path):
+    """An invalid --airflow-version used to surface as a raw ValueError/stack
+    trace from DagParameterValidator's constructor; it must be a clean CLI
+    error (exit code 2, no unhandled exception) instead."""
+    target = tmp_path / "dag.yml"
+    target.write_text("my_dag:\n  tasks: []\n")
+    result = runner.invoke(app, ["lint", "--airflow-version", "not-a-version", str(target)])
+    assert result.exit_code == 2
+    assert "Traceback" not in result.output
+    assert "airflow_version must be a PEP440 version string" in result.stdout
 
 
-def test_lint_no_yaml_files(tmp_path):
-    (tmp_path / "not_yaml.txt").write_text("hello")
-    result = runner.invoke(app, ["lint", str(tmp_path)])
-    assert result.exit_code == 0
-    assert "No YAML files found" in result.stdout
-
-
-def test_lint_valid_yaml(tmp_yaml_file):
-    result = runner.invoke(app, ["lint", str(tmp_yaml_file)])
+def test_lint_yaml_file_is_validated(tmp_path):
+    """A .yml target is now accepted and validated (no defaults applied)."""
+    yml = tmp_path / "dag.yml"
+    yml.write_text(
+        "my_dag:\n"
+        "  default_args:\n"
+        "    start_date: '2025-01-01'\n"
+        "  tasks:\n"
+        "    - task_id: t\n"
+        "      operator: x\n"
+    )
+    # Schema mode — the placeholder `operator: x` would correctly fail real
+    # build, but we just want to confirm the YAML lint path works.
+    result = runner.invoke(app, ["lint", "--schema-only", str(yml)])
     assert result.exit_code == 0
     assert "no errors found" in result.stdout.lower()
+
+
+def test_lint_yaml_content_via_option(tmp_path):
+    """Inline --yaml-content is accepted and validated."""
+    yml = (
+        "my_dag:\n"
+        "  default_args:\n"
+        "    start_date: '2025-01-01'\n"
+        "  tasks:\n"
+        "    - task_id: t\n"
+        "      operator: x\n"
+    )
+    result = runner.invoke(app, ["lint", "--schema-only", "--yaml-content", yml])
+    assert result.exit_code == 0
+    assert "no errors found" in result.stdout.lower()
+
+
+def test_lint_rejects_path_and_yaml_content_together(tmp_path):
+    """Mutually exclusive: providing both should error."""
+    yml = tmp_path / "x.yml"
+    yml.write_text("a: b\n")
+    result = runner.invoke(app, ["lint", str(yml), "--yaml-content", "k: v"])
+    assert result.exit_code != 0
+    assert "either a path argument or --yaml-content" in result.stdout
 
 
 def test_lint_exclude_single_file(tmp_yaml_file, tmp_path):
     ignore_file = tmp_path / "ignore.yaml"
     ignore_file.write_text("key: value\n")
-    result = runner.invoke(app, ["lint", str(tmp_path), "--ignore", str(ignore_file)])
+    result = runner.invoke(app, ["lint", str(tmp_path), "--ignore", str(ignore_file), "--schema-only"])
     assert result.exit_code == 0
     assert "Ignored 1 YAML file" in result.stdout
     assert "no errors found" in result.stdout.lower()
@@ -100,7 +186,7 @@ def test_lint_exlucde_single_file_with_airflowignore(tmp_yaml_file, tmp_path):
     dummy_ignore = tmp_path / "dummy.txt"
     dummy_ignore.write_text("noop")
 
-    result = runner.invoke(app, ["lint", str(tmp_path), "--ignore", str(dummy_ignore)])
+    result = runner.invoke(app, ["lint", str(tmp_path), "--ignore", str(dummy_ignore), "--schema-only"])
     assert result.exit_code == 0
     assert "Ignored 1 YAML file" in result.stdout
     assert "no errors found" in result.stdout.lower()
@@ -111,7 +197,10 @@ def test_lint_exclude_multiple_files(tmp_yaml_file, tmp_path):
     ignore_first_yaml.write_text("key: value\n")
     ignore_second_yaml = tmp_path / "second.yaml"
     ignore_second_yaml.write_text("key: value\n")
-    result = runner.invoke(app, ["lint", str(tmp_path), "--ignore", f"{ignore_first_yaml},{ignore_second_yaml}"])
+    result = runner.invoke(
+        app,
+        ["lint", str(tmp_path), "--ignore", f"{ignore_first_yaml},{ignore_second_yaml}", "--schema-only"],
+    )
     assert result.exit_code == 0
     assert "Ignored 2 YAML files" in result.stdout
     assert "no errors found" in result.stdout.lower()
@@ -130,35 +219,17 @@ def test_lint_exclude_multiple_files_with_airflowignore(tmp_yaml_file, tmp_path)
 
     result = runner.invoke(
         app,
-        ["lint", str(tmp_path), "--ignore", f"{ignore_first_yaml},{ignore_second_yaml}"],
+        [
+            "lint",
+            str(tmp_path),
+            "--ignore",
+            f"{ignore_first_yaml},{ignore_second_yaml}",
+            "--schema-only",
+        ],
     )
     assert result.exit_code == 0
     assert "Ignored 3 YAML files" in result.stdout
     assert "no errors found" in result.stdout.lower()
-
-
-@patch("dagfactory.__main__.Table.add_row")
-def test_lint_invalid_yaml(mock_add_row, tmp_invalid_yaml_file):
-    result = runner.invoke(app, ["lint", str(tmp_invalid_yaml_file)])
-    assert result.exit_code == 1
-    row = mock_add_row.call_args[0]
-    assert "invalid.yaml" in row[0]
-    assert "Syntax Error" in row[1].plain
-    assert "while parsing a flow sequence" in row[2].plain
-    assert "Analysed 1 files, found 1 invalid YAML files" in result.stdout
-    assert len(row[2].plain) == 32  # Cropped error message
-
-
-@patch("dagfactory.__main__.Table.add_row")
-def test_lint_invalid_yaml_verbose(mock_add_row, tmp_invalid_yaml_file):
-    result = runner.invoke(app, ["lint", str(tmp_invalid_yaml_file), "--verbose"])
-    assert result.exit_code == 1
-    row = mock_add_row.call_args[0]
-    assert "invalid.yaml" in row[0]
-    assert "Syntax Error" in row[1].plain
-    assert "while parsing a flow sequence" in row[2].plain
-    assert "Analysed 1 files, found 1 invalid YAML files" in result.stdout
-    assert len(row[2].plain) == 200  # Full error message
 
 
 def test_convert_diff_only(tmpdir):

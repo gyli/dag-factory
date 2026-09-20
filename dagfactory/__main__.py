@@ -1,16 +1,20 @@
 import difflib
 from copy import deepcopy
 from pathlib import Path
+from typing import Optional
 
 import typer
 import yaml
+from airflow.version import version as AIRFLOW_VERSION
 from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 
 from dagfactory import __version__
 from dagfactory._yaml import load_yaml_file
+from dagfactory.constants import DEFAULTS_FILE_NAMES
 from dagfactory.utils import update_yaml_structure
+from dagfactory.validator import DagParameterValidator
 
 DESCRIPTION = """
 [bold][medium_purple3]DAG Factory[/medium_purple3][/bold]: Dynamically build Apache Airflow DAGs from YAML files
@@ -29,20 +33,34 @@ app = typer.Typer(
 )
 
 
-def _check_yaml_syntax(file_path: Path):
+def _find_lintable_files(path: Path) -> list[Path]:
+    """Find the YAML configs lint can process under *path*.
+
+    Files named ``defaults.yml``/``defaults.yaml`` are dag-factory
+    infrastructure rather than DAG configs, and are left out.
     """
-    Check if the YAML file is valid.
-    """
-    try:
-        load_yaml_file(file_path)
-    except yaml.YAMLError as e:
-        return str(e)
+    if not path.exists():
+        console.print(f"[red]Error:[/red] Path '{path}' does not exist.")
+        raise typer.Exit(1)
+
+    if path.is_dir():
+        candidates = sorted(list(path.rglob("*.yml")) + list(path.rglob("*.yaml")))
+        files = [p for p in candidates if p.name not in DEFAULTS_FILE_NAMES]
+        if not files:
+            skipped = len(candidates) - len(files)
+            note = f" ({skipped} defaults file(s) skipped)" if skipped else ""
+            console.print(f"[yellow]No YAML configs found in '{path}'{note}.[/yellow]")
+            raise typer.Exit()
+        return files
+
+    if path.suffix not in (".yml", ".yaml"):
+        console.print(f"[red]Error:[/red] '{path}' is not a YAML config. " "lint checks .yml/.yaml files.")
+        raise typer.Exit(1)
+    return [path]
 
 
 def _find_yaml_files(path: Path) -> list[Path]:
-    """
-    Find all YAML files in the directory.
-    """
+    """YAML-only file finder retained for the ``convert`` command."""
     if not path.exists():
         console.print(f"[red]Error:[/red] Path '{path}' does not exist.")
         raise typer.Exit(1)
@@ -138,39 +156,149 @@ def main(
 
 @app.command()
 def lint(
-    path: Path = typer.Argument(..., help="Path to a directory containing YAML files or to a YAML file to lint"),
+    path: Optional[Path] = typer.Argument(
+        None,
+        help=(
+            "Path to a YAML config (.yml/.yaml) or a directory of them. The defaults.yml "
+            "chain is resolved by walking up from the file, as dag-factory does at runtime."
+        ),
+    ),
+    yaml_content: Optional[str] = typer.Option(
+        None,
+        "--yaml-content",
+        "-c",
+        help=(
+            "Inline YAML to validate, as a complete DAG config: one or more top-level DAG "
+            "entries, with everything they need to build. Mutually exclusive with the path "
+            "argument. A string has no location on disk, so the defaults.yml chain cannot be "
+            "walked up from it; pass --defaults-path to supply one, or anything inherited "
+            "from defaults will be reported as missing."
+        ),
+    ),
+    airflow_version: str = typer.Option(
+        AIRFLOW_VERSION,
+        "--airflow-version",
+        "-a",
+        help="Airflow version to validate against (e.g. '3.1.2' or just '2'). "
+        "Defaults to the installed Airflow version.",
+    ),
+    schema_only: bool = typer.Option(
+        False,
+        "--schema-only",
+        help="Validate only against the bundled JSON schema; do not build real Airflow DAGs. "
+        "Useful when not every operator package referenced in the YAML is installed.",
+    ),
+    defaults_path: Optional[Path] = typer.Option(
+        None,
+        "--defaults-path",
+        help=(
+            "Root directory to search for defaults.yml/defaults.yaml, as dag-factory does at "
+            "runtime. Defaults to Airflow's dags_folder. Required with --yaml-content when the "
+            "config inherits anything from a defaults file."
+        ),
+    ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show full error messages"),
     ignore: Path = typer.Option(None, "--ignore", "-i", help="Files or directories to ignore"),
 ):
-    """Scan YAML files for syntax errors."""
-    files = _find_yaml_files(path)
-    airflow_ignore_files = _find_yaml_files_on_airflow_ignore(path)
-    if ignore:
-        _exclude_yaml_files(files, ignore, airflow_ignore_files)
+    """Validate dag-factory YAML configs.
 
-    table = Table(title="[bold][medium_purple3]DAG Factory[/medium_purple3][/bold]: YAML Lint Results", show_lines=True)
+    Takes a YAML config or a directory of them. Files named defaults.yml /
+    defaults.yaml are dag-factory infrastructure and are skipped, though their
+    contents are still merged into the DAGs that inherit from them.
+
+    Default (build mode) runs the full dag-factory + Airflow build pipeline and reports
+    any exception (operator typos, dependency cycles, schedule conflicts, etc.).
+    Pass --schema-only to validate against the bundled JSON schema instead — cheaper,
+    and works without every operator package installed.
+    """
+    if (path is None) == (yaml_content is None):
+        console.print("[red]Error:[/red] provide either a path argument or --yaml-content (not both).")
+        raise typer.Exit(1)
+
+    table = Table(
+        title="[bold][medium_purple3]DAG Factory[/medium_purple3][/bold]: Lint Results",
+        show_lines=True,
+    )
     table.add_column("File", style="cyan", no_wrap=True)
     table.add_column("Status", style="bold")
     table.add_column("Error Message", style="red", no_wrap=False, overflow="fold")
 
+    try:
+        validator = DagParameterValidator(
+            airflow_version=airflow_version,
+            schema_only=schema_only,
+            defaults_config_path=str(defaults_path) if defaults_path else None,
+        )
+    except ValueError as exc:
+        console.print(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(2)
+
     total_errors = 0
-    for file_path in files:
-        error = _check_yaml_syntax(file_path)
-        if error:
-            total_errors += 1
-            message = error.strip() if verbose else error.strip().split("\n")[0][:120] + "..."
-            table.add_row(str(file_path), Text("Syntax Error", style="red"), Text(message, style="red"))
-        else:
-            table.add_row(str(file_path), Text("OK", style="green"), "")
+    total_warnings = 0
+
+    def render_results(label_prefix, results):
+        """Render a list of FileValidationResult into the table."""
+        nonlocal total_errors, total_warnings
+        for sub in results:
+            # sub.file is resolved to an absolute path by the validator, while
+            # label_prefix is whatever the user passed on the CLI (often
+            # relative) — compare resolved paths so a loader that just
+            # validates itself doesn't get a spurious "path → filename" arrow.
+            if label_prefix and sub.file.resolve() != Path(label_prefix).resolve():
+                label = f"{label_prefix} → {sub.file.name}"
+            else:
+                label = label_prefix or str(sub.file)
+            if sub.errors:
+                total_errors += 1
+                total_warnings += len(sub.warnings)
+                msg = _format_issues(sub, verbose)
+                table.add_row(label, Text("Error", style="red"), Text(msg, style="red"))
+            elif sub.warnings:
+                total_warnings += len(sub.warnings)
+                msg = _format_issues(sub, verbose)
+                table.add_row(label, Text("Warnings", style="yellow"), Text(msg, style="yellow"))
+            else:
+                table.add_row(label, Text("OK", style="green"), "")
+
+    if yaml_content is not None:
+        results = validator.validate_yaml_content(yaml_content)
+        render_results(label_prefix=None, results=results)
+        analysed = 1
+    else:
+        files = _find_lintable_files(path)
+        if ignore:
+            airflow_ignore_files = _find_yaml_files_on_airflow_ignore(path)
+            _exclude_yaml_files(files, ignore, airflow_ignore_files)
+        for file_path in files:
+            results = validator.validate_yaml_file(file_path)
+            render_results(label_prefix=str(file_path), results=results)
+        analysed = len(files)
 
     console.print(table)
-    if total_errors > 0:
-        console.print(f"Analysed {len(files)} files, found [red]{total_errors}[/red] invalid YAML files.")
+    summary = f"Analysed {analysed} file(s)"
+    if total_errors:
+        console.print(
+            f"{summary}, found [red]{total_errors}[/red] file(s) with errors and "
+            f"[yellow]{total_warnings}[/yellow] warning(s)."
+        )
         if not verbose:
-            console.print(f"For more details on the errors, run with --verbose.")
+            console.print("For more details on the errors, run with --verbose.")
         raise typer.Exit(1)
-    else:
-        console.print(f"Analysed {len(files)} files, [green]no errors found.[/green]")
+    if total_warnings:
+        console.print(f"{summary}, [green]no errors[/green], [yellow]{total_warnings}[/yellow] warning(s).")
+        return
+    console.print(f"{summary}, [green]no errors found.[/green]")
+
+
+def _format_issues(result, verbose: bool) -> str:
+    """Format validator findings for display in the lint table."""
+    lines = [f"{i.severity.upper()}: {i.render()}" for i in result.issues]
+    text = "\n".join(lines)
+    if verbose:
+        return text
+    if len(text) > 200:
+        return text[:197] + "..."
+    return text
 
 
 def _file_or_files(count: int) -> str:

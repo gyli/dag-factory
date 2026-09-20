@@ -1,0 +1,654 @@
+{
+  "$defs": {
+    "_shared": {
+      "properties": {
+        "end_date": {
+          "description": "May be set on the DAG body or under default_args.",
+          "type": "string"
+        },
+        "on_failure_callback": {
+          "$ref": "#/$defs/types/callback"
+        },
+        "on_success_callback": {
+          "$ref": "#/$defs/types/callback"
+        },
+        "owner": {
+          "type": "string"
+        },
+        "start_date": {
+          "description": "May be set on the DAG body or under default_args.",
+          "type": "string"
+        }
+      }
+    },
+    "dag_only": {
+      "properties": {
+        "access_control": {
+          "type": "object"
+        },
+        "allowed_run_types": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "x-airflow-min-version": "3.2"
+        },
+        "auto_register": {
+          "description": "Not yet wired through dag-factory (see github issue #696).",
+          "type": "boolean",
+          "x-airflow-min-version": "2.7",
+          "x-dagfactory-supported": false
+        },
+        "catchup": {
+          "type": "boolean"
+        },
+        "concurrency": {
+          "description": "Deprecated alias for max_active_tasks; dag-factory forwards it as max_active_tasks.",
+          "type": "integer",
+          "x-deprecated-in-favor-of": "max_active_tasks",
+          "x-deprecated-since": "2.2"
+        },
+        "dag_display_name": {
+          "type": "string"
+        },
+        "dag_id": {
+          "description": "When omitted, dag-factory uses the YAML key as the dag_id.",
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "type": "string"
+        },
+        "dagrun_timeout": {
+          "$ref": "#/$defs/types/timedelta_like"
+        },
+        "deadline": {
+          "description": "Replacement for the removed SLA feature. Not yet wired through dag-factory (see github issue #696).",
+          "oneOf": [
+            {
+              "type": "array"
+            },
+            {
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "x-airflow-min-version": "3.1",
+          "x-dagfactory-supported": false
+        },
+        "default_view": {
+          "description": "The Airflow 3 UI does not honour this setting.",
+          "enum": [
+            "grid",
+            "graph",
+            "duration",
+            "gantt",
+            "landing_times",
+            "tree"
+          ],
+          "type": "string",
+          "x-airflow-max-version": "2"
+        },
+        "description": {
+          "type": "string"
+        },
+        "doc_md": {
+          "type": "string"
+        },
+        "fail_fast": {
+          "description": "Not yet wired through dag-factory (see github issue #696).",
+          "type": "boolean",
+          "x-dagfactory-supported": false
+        },
+        "is_paused_upon_creation": {
+          "type": "boolean"
+        },
+        "jinja_environment_kwargs": {
+          "description": "Not yet wired through dag-factory (see github issue #696).",
+          "type": "object",
+          "x-dagfactory-supported": false
+        },
+        "max_active_runs": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "max_active_tasks": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "max_consecutive_failed_dag_runs": {
+          "description": "Not yet wired through dag-factory (see github issue #696).",
+          "minimum": 0,
+          "type": "integer",
+          "x-airflow-min-version": "2.9",
+          "x-dagfactory-supported": false
+        },
+        "orientation": {
+          "enum": [
+            "LR",
+            "TB",
+            "RL",
+            "BT"
+          ],
+          "type": "string",
+          "x-airflow-max-version": "2"
+        },
+        "owner_links": {
+          "description": "Not yet wired through dag-factory (see github issue #696).",
+          "type": "object",
+          "x-airflow-min-version": "2.3",
+          "x-dagfactory-supported": false
+        },
+        "params": {
+          "type": "object"
+        },
+        "render_template_as_native_obj": {
+          "type": "boolean"
+        },
+        "schedule": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "array"
+            },
+            {
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "schedule_interval": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Use `schedule` instead.",
+          "x-airflow-max-version": "2",
+          "x-deprecated-since": "2.4"
+        },
+        "sla_miss_callback": {
+          "$ref": "#/$defs/types/callback",
+          "x-airflow-max-version": "3.0",
+          "x-deprecated-since": "2.0"
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "template_searchpath": {
+          "$ref": "#/$defs/types/string_or_string_array"
+        },
+        "template_undefined": {
+          "description": "Not yet wired through dag-factory (see github issue #696).",
+          "type": "string",
+          "x-dagfactory-supported": false
+        },
+        "timetable": {
+          "description": "Airflow 3+ accepts a Timetable instance via `schedule` instead of a separate kwarg.",
+          "type": "object",
+          "x-airflow-max-version": "2"
+        },
+        "user_defined_filters": {
+          "description": "Not yet wired through dag-factory (see github issue #696).",
+          "type": "object",
+          "x-dagfactory-supported": false
+        },
+        "user_defined_macros": {
+          "description": "Mapping of macro name to value. String values are imported as callables via their dotted path; nested mappings are resolved recursively.",
+          "type": "object"
+        }
+      }
+    },
+    "dagfactory_only": {
+      "properties": {
+        "doc_md_file_path": {
+          "description": "(dag-factory only) Path to a markdown file whose contents are assigned to dag.doc_md.",
+          "type": "string"
+        },
+        "doc_md_python_arguments": {
+          "description": "(dag-factory only) Keyword arguments passed to doc_md_python_callable_name.",
+          "type": "object"
+        },
+        "doc_md_python_callable_file": {
+          "description": "(dag-factory only) Path to a Python file containing a callable that returns markdown.",
+          "type": "string"
+        },
+        "doc_md_python_callable_name": {
+          "description": "(dag-factory only) Name of the callable inside doc_md_python_callable_file.",
+          "type": "string"
+        },
+        "task_groups": {
+          "$ref": "#/$defs/types/mapping_or_list",
+          "description": "(dag-factory only) Mapping or list of task group definitions; not an Airflow DAG argument."
+        },
+        "tasks": {
+          "$ref": "#/$defs/types/mapping_or_list",
+          "description": "(dag-factory only) Mapping or list of task definitions; not an Airflow DAG argument."
+        },
+        "timezone": {
+          "description": "(dag-factory only) Timezone for parsing start_date / end_date; not passed to Airflow's DAG().",
+          "type": "string"
+        }
+      }
+    },
+    "default_args": {
+      "additionalProperties": true,
+      "dependentRequired": {
+        "retry_exponential_backoff": [
+          "max_retry_delay"
+        ]
+      },
+      "properties": {
+        "depends_on_past": {
+          "$ref": "#/$defs/task_only/properties/depends_on_past"
+        },
+        "email": {
+          "$ref": "#/$defs/task_only/properties/email"
+        },
+        "email_on_failure": {
+          "$ref": "#/$defs/task_only/properties/email_on_failure"
+        },
+        "email_on_retry": {
+          "$ref": "#/$defs/task_only/properties/email_on_retry"
+        },
+        "end_date": {
+          "$ref": "#/$defs/_shared/properties/end_date"
+        },
+        "execution_timeout": {
+          "$ref": "#/$defs/task_only/properties/execution_timeout"
+        },
+        "max_retry_delay": {
+          "$ref": "#/$defs/task_only/properties/max_retry_delay"
+        },
+        "on_execute_callback": {
+          "$ref": "#/$defs/task_only/properties/on_execute_callback"
+        },
+        "on_failure_callback": {
+          "$ref": "#/$defs/_shared/properties/on_failure_callback"
+        },
+        "on_retry_callback": {
+          "$ref": "#/$defs/task_only/properties/on_retry_callback"
+        },
+        "on_success_callback": {
+          "$ref": "#/$defs/_shared/properties/on_success_callback"
+        },
+        "owner": {
+          "$ref": "#/$defs/_shared/properties/owner"
+        },
+        "pool": {
+          "$ref": "#/$defs/task_only/properties/pool"
+        },
+        "pool_slots": {
+          "$ref": "#/$defs/task_only/properties/pool_slots"
+        },
+        "priority_weight": {
+          "$ref": "#/$defs/task_only/properties/priority_weight"
+        },
+        "queue": {
+          "$ref": "#/$defs/task_only/properties/queue"
+        },
+        "retries": {
+          "$ref": "#/$defs/task_only/properties/retries"
+        },
+        "retry_delay": {
+          "$ref": "#/$defs/task_only/properties/retry_delay"
+        },
+        "retry_exponential_backoff": {
+          "$ref": "#/$defs/task_only/properties/retry_exponential_backoff"
+        },
+        "sla": {
+          "$ref": "#/$defs/task_only/properties/sla"
+        },
+        "start_date": {
+          "$ref": "#/$defs/_shared/properties/start_date"
+        },
+        "timezone": {
+          "$ref": "#/$defs/dagfactory_only/properties/timezone"
+        },
+        "trigger_rule": {
+          "$ref": "#/$defs/task_only/properties/trigger_rule"
+        },
+        "wait_for_downstream": {
+          "$ref": "#/$defs/task_only/properties/wait_for_downstream"
+        },
+        "weight_rule": {
+          "$ref": "#/$defs/task_only/properties/weight_rule"
+        }
+      },
+      "type": "object"
+    },
+    "task_only": {
+      "properties": {
+        "depends_on_past": {
+          "type": "boolean"
+        },
+        "email": {
+          "$ref": "#/$defs/types/string_or_string_array"
+        },
+        "email_on_failure": {
+          "type": "boolean"
+        },
+        "email_on_retry": {
+          "type": "boolean"
+        },
+        "execution_timeout": {
+          "$ref": "#/$defs/types/timedelta_like"
+        },
+        "max_retry_delay": {
+          "$ref": "#/$defs/types/timedelta_like"
+        },
+        "on_execute_callback": {
+          "$ref": "#/$defs/types/callback"
+        },
+        "on_retry_callback": {
+          "$ref": "#/$defs/types/callback"
+        },
+        "pool": {
+          "type": "string"
+        },
+        "pool_slots": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "priority_weight": {
+          "type": "integer"
+        },
+        "queue": {
+          "type": "string"
+        },
+        "retries": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "retry_delay": {
+          "$ref": "#/$defs/types/timedelta_like"
+        },
+        "retry_exponential_backoff": {
+          "type": "boolean"
+        },
+        "sla": {
+          "$ref": "#/$defs/types/timedelta_like",
+          "x-airflow-max-version": "3.0",
+          "x-deprecated-since": "2.0"
+        },
+        "trigger_rule": {
+          "type": "string"
+        },
+        "wait_for_downstream": {
+          "type": "boolean"
+        },
+        "weight_rule": {
+          "type": "string"
+        }
+      }
+    },
+    "types": {
+      "callback": {
+        "description": "Python callable spec: import-path string, dict spec, or list of either.",
+        "oneOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "object"
+          },
+          {
+            "type": "array"
+          }
+        ]
+      },
+      "mapping_or_list": {
+        "oneOf": [
+          {
+            "type": "array"
+          },
+          {
+            "type": "object"
+          }
+        ]
+      },
+      "string_or_string_array": {
+        "oneOf": [
+          {
+            "type": "string"
+          },
+          {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        ]
+      },
+      "timedelta_like": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "object"
+          }
+        ],
+        "description": "Duration: string ('5 minutes'), seconds as integer or float, or a {seconds: N}-style dict."
+      }
+    }
+  },
+  "$id": "https://github.com/astronomer/dag-factory/schemas/dag_parameters.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "dependentRequired": {
+    "doc_md_python_arguments": [
+      "doc_md_python_callable_name"
+    ],
+    "doc_md_python_callable_file": [
+      "doc_md_python_callable_name"
+    ],
+    "doc_md_python_callable_name": [
+      "doc_md_python_callable_file"
+    ]
+  },
+  "description": "Schema for DAG-level parameters that DAG Factory accepts in YAML configuration. Most properties map to airflow.sdk.DAG constructor arguments; dag-factory-specific conventions are grouped under $defs/dagfactory_only. See https://astronomer.github.io/dag-factory/latest/features/cli/ for the custom x-* annotations used by the lint command.",
+  "properties": {
+    "access_control": {
+      "$ref": "#/$defs/dag_only/properties/access_control"
+    },
+    "allowed_run_types": {
+      "$ref": "#/$defs/dag_only/properties/allowed_run_types"
+    },
+    "auto_register": {
+      "$ref": "#/$defs/dag_only/properties/auto_register"
+    },
+    "catchup": {
+      "$ref": "#/$defs/dag_only/properties/catchup"
+    },
+    "concurrency": {
+      "$ref": "#/$defs/dag_only/properties/concurrency"
+    },
+    "dag_display_name": {
+      "$ref": "#/$defs/dag_only/properties/dag_display_name"
+    },
+    "dag_id": {
+      "$ref": "#/$defs/dag_only/properties/dag_id"
+    },
+    "dagrun_timeout": {
+      "$ref": "#/$defs/dag_only/properties/dagrun_timeout"
+    },
+    "deadline": {
+      "$ref": "#/$defs/dag_only/properties/deadline"
+    },
+    "default_args": {
+      "$ref": "#/$defs/default_args"
+    },
+    "default_view": {
+      "$ref": "#/$defs/dag_only/properties/default_view"
+    },
+    "description": {
+      "$ref": "#/$defs/dag_only/properties/description"
+    },
+    "doc_md": {
+      "$ref": "#/$defs/dag_only/properties/doc_md"
+    },
+    "doc_md_file_path": {
+      "$ref": "#/$defs/dagfactory_only/properties/doc_md_file_path"
+    },
+    "doc_md_python_arguments": {
+      "$ref": "#/$defs/dagfactory_only/properties/doc_md_python_arguments"
+    },
+    "doc_md_python_callable_file": {
+      "$ref": "#/$defs/dagfactory_only/properties/doc_md_python_callable_file"
+    },
+    "doc_md_python_callable_name": {
+      "$ref": "#/$defs/dagfactory_only/properties/doc_md_python_callable_name"
+    },
+    "end_date": {
+      "$ref": "#/$defs/_shared/properties/end_date"
+    },
+    "fail_fast": {
+      "$ref": "#/$defs/dag_only/properties/fail_fast"
+    },
+    "is_paused_upon_creation": {
+      "$ref": "#/$defs/dag_only/properties/is_paused_upon_creation"
+    },
+    "jinja_environment_kwargs": {
+      "$ref": "#/$defs/dag_only/properties/jinja_environment_kwargs"
+    },
+    "max_active_runs": {
+      "$ref": "#/$defs/dag_only/properties/max_active_runs"
+    },
+    "max_active_tasks": {
+      "$ref": "#/$defs/dag_only/properties/max_active_tasks"
+    },
+    "max_consecutive_failed_dag_runs": {
+      "$ref": "#/$defs/dag_only/properties/max_consecutive_failed_dag_runs"
+    },
+    "on_failure_callback": {
+      "$ref": "#/$defs/_shared/properties/on_failure_callback"
+    },
+    "on_success_callback": {
+      "$ref": "#/$defs/_shared/properties/on_success_callback"
+    },
+    "orientation": {
+      "$ref": "#/$defs/dag_only/properties/orientation"
+    },
+    "owner_links": {
+      "$ref": "#/$defs/dag_only/properties/owner_links"
+    },
+    "params": {
+      "$ref": "#/$defs/dag_only/properties/params"
+    },
+    "render_template_as_native_obj": {
+      "$ref": "#/$defs/dag_only/properties/render_template_as_native_obj"
+    },
+    "schedule": {
+      "$ref": "#/$defs/dag_only/properties/schedule"
+    },
+    "schedule_interval": {
+      "$ref": "#/$defs/dag_only/properties/schedule_interval"
+    },
+    "sla_miss_callback": {
+      "$ref": "#/$defs/dag_only/properties/sla_miss_callback"
+    },
+    "start_date": {
+      "$ref": "#/$defs/_shared/properties/start_date"
+    },
+    "tags": {
+      "$ref": "#/$defs/dag_only/properties/tags"
+    },
+    "task_groups": {
+      "$ref": "#/$defs/dagfactory_only/properties/task_groups"
+    },
+    "tasks": {
+      "$ref": "#/$defs/dagfactory_only/properties/tasks"
+    },
+    "template_searchpath": {
+      "$ref": "#/$defs/dag_only/properties/template_searchpath"
+    },
+    "template_undefined": {
+      "$ref": "#/$defs/dag_only/properties/template_undefined"
+    },
+    "timetable": {
+      "$ref": "#/$defs/dag_only/properties/timetable"
+    },
+    "timezone": {
+      "$ref": "#/$defs/dagfactory_only/properties/timezone"
+    },
+    "user_defined_filters": {
+      "$ref": "#/$defs/dag_only/properties/user_defined_filters"
+    },
+    "user_defined_macros": {
+      "$ref": "#/$defs/dag_only/properties/user_defined_macros"
+    }
+  },
+  "required": [
+    "tasks"
+  ],
+  "title": "DAG Factory DAG Parameters",
+  "type": "object",
+  "x-mutually-exclusive": [
+    {
+      "fields": [
+        "schedule",
+        "schedule_interval",
+        "timetable"
+      ],
+      "message": "Only one of `schedule`, `schedule_interval`, or `timetable` may be set."
+    },
+    {
+      "fields": [
+        "concurrency",
+        "max_active_tasks"
+      ],
+      "message": "`concurrency` is a deprecated alias for `max_active_tasks`; do not set both."
+    },
+    {
+      "fields": [
+        "doc_md",
+        "doc_md_file_path",
+        "doc_md_python_callable_file"
+      ],
+      "message": "Pick a single source for `doc_md`: an inline string, a file path, or a python callable."
+    }
+  ],
+  "x-required-anywhere": [
+    {
+      "fields": [
+        "start_date",
+        "default_args.start_date"
+      ],
+      "message": "A `start_date` must be set on the DAG body or under default_args."
+    }
+  ]
+}
