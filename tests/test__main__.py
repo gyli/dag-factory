@@ -145,7 +145,7 @@ def test_lint_invalid_yaml(mock_add_row, tmp_invalid_yaml_file):
     assert "invalid.yaml" in row[0]
     assert "Syntax Error" in row[1].plain
     assert "while parsing a flow sequence" in row[2].plain
-    assert "Analysed 1 files, found 1 invalid YAML files" in result.stdout
+    assert "Analysed 1 file, found 1 with errors" in result.stdout
     assert len(row[2].plain) == 32  # Cropped error message
 
 
@@ -157,7 +157,7 @@ def test_lint_invalid_yaml_verbose(mock_add_row, tmp_invalid_yaml_file):
     assert "invalid.yaml" in row[0]
     assert "Syntax Error" in row[1].plain
     assert "while parsing a flow sequence" in row[2].plain
-    assert "Analysed 1 files, found 1 invalid YAML files" in result.stdout
+    assert "Analysed 1 file, found 1 with errors" in result.stdout
     assert len(row[2].plain) == 200  # Full error message
 
 
