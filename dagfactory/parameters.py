@@ -476,35 +476,6 @@ def check_for_lint(config: Dict[str, Any], airflow_version: Version) -> List[Tup
     return findings + check_tasks(config, airflow_version)
 
 
-#: Task keys dag-factory consumes itself, so they never reach the operator.
-#: ``operator``/``decorator`` choose what to build, the rest steer how.
-DAGFACTORY_TASK_KEYS = frozenset(
-    {
-        "task_id",
-        "operator",
-        "decorator",
-        "dependencies",
-        "task_group_name",
-        "parent_group_name",
-        "expand",
-        "expand_kwargs",
-        "partial",
-        "multiple_outputs",
-        "python_callable",
-        "python_callable_name",
-        "python_callable_file",
-        "python_callable_lambda",
-        "response_check",
-        "response_check_name",
-        "response_check_file",
-        "response_check_lambda",
-        "callback",
-        "callback_name",
-        "callback_file",
-    }
-)
-
-
 def check_tasks(config: Dict[str, Any], airflow_version: Version) -> List[Tuple[str, str, str]]:
     """Check each task's own parameters, and how the tasks fit together.
 
@@ -515,9 +486,10 @@ def check_tasks(config: Dict[str, Any], airflow_version: Version) -> List[Tuple[
     these while building would duplicate the work and the message. Lint never
     builds, so it has to do the work itself.
 
-    Task configs carry operator keyword arguments this table does not model, so
-    an unrecognised key is only reported when the operator could be imported
-    and does not accept it. Anything dag-factory consumes itself is skipped.
+    Unrecognised keys are not reported. Most Airflow operators take ``*args``
+    and ``**kwargs``, so a signature cannot tell a typo from a legitimate
+    operator argument; Airflow decides at construction, raising ``TypeError:
+    Invalid arguments were passed`` for what it does not want.
     """
     findings: List[Tuple[str, str, str]] = []
     tasks = config.get("tasks")
@@ -532,17 +504,8 @@ def check_tasks(config: Dict[str, Any], airflow_version: Version) -> List[Tuple[
             continue
 
         prefix = f"tasks.{task_id}"
-        accepted = _operator_params(task, prefix, findings)
-
+        _check_importable(task, prefix, findings)
         findings += _under(prefix, check(task, airflow_version, scope="task", report_unknown=False))
-
-        # Whether a key this table does not model is a typo depends on the
-        # operator, so it is only judged when the operator could be imported.
-        if accepted is not None:
-            for key in task:
-                if key in PARAM_METADATA or key in DAGFACTORY_TASK_KEYS or key in accepted:
-                    continue
-                findings.append((WARNING, f"{prefix}.{key}", f"`{key}` is not an argument of this operator."))
 
         for upstream in task.get("dependencies") or []:
             if upstream not in tasks and upstream not in group_names:
@@ -554,63 +517,21 @@ def check_tasks(config: Dict[str, Any], airflow_version: Version) -> List[Tuple[
     return findings
 
 
-def _operator_params(task: Dict[str, Any], prefix: str, findings: List[Tuple[str, str, str]]):
-    """Import the task's operator and return the arguments it accepts.
-
-    Returns ``None`` when there is nothing to import or the import failed, in
-    which case the caller cannot say whether a key is valid.
-    """
+def _check_importable(task: Dict[str, Any], prefix: str, findings: List[Tuple[str, str, str]]) -> None:
+    """Report a task whose operator or decorator cannot be imported."""
     from dagfactory.utils import import_string
 
     target = task.get("operator") or task.get("decorator")
     if not target:
         findings.append((ERROR, prefix, "A task must define either `operator` or `decorator`."))
-        return None
+        return
     if not isinstance(target, str):
-        return None
+        return
 
     try:
-        obj = import_string(target)
+        import_string(target)
     except Exception as exc:
         findings.append((ERROR, prefix, f"Cannot import `{target}`: {type(exc).__name__}: {exc}"))
-        return None
-    return _accepted_arguments(obj)
-
-
-@lru_cache(maxsize=None)
-def _accepted_arguments(obj) -> Optional[frozenset]:
-    """Keyword arguments *obj* accepts.
-
-    For an operator class that means walking the MRO, since operators pass
-    ``**kwargs`` up to ``BaseOperator``. Returns ``None`` when the signature
-    cannot be read, so the caller stays quiet rather than guessing.
-    """
-    import inspect
-
-    if inspect.isclass(obj):
-        signatures = []
-        for klass in obj.__mro__:
-            init = klass.__dict__.get("__init__")
-            if init is not None:
-                try:
-                    signatures.append(inspect.signature(init))
-                except (TypeError, ValueError):
-                    continue
-    else:
-        try:
-            signatures = [inspect.signature(obj)]
-        except (TypeError, ValueError):
-            signatures = []
-
-    if not signatures:
-        return None
-
-    return frozenset(
-        parameter.name
-        for signature in signatures
-        for parameter in signature.parameters.values()
-        if parameter.kind in (parameter.POSITIONAL_OR_KEYWORD, parameter.KEYWORD_ONLY) and parameter.name != "self"
-    )
 
 
 def _check_for_cycles(tasks: Dict[str, Any]) -> List[Tuple[str, str, str]]:

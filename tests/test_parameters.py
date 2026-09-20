@@ -254,16 +254,20 @@ class TestTaskChecks:
         )
         assert findings == []
 
-    def test_key_the_operator_does_not_accept_is_a_warning(self):
+    def test_unrecognised_task_keys_are_left_alone(self):
+        """Most operators take **kwargs, so a signature cannot spot a typo.
+
+        Airflow decides at construction and raises `Invalid arguments were
+        passed`, so guessing here would only risk false positives.
+        """
         findings = self._check({"t": {"operator": BASH, "bash_command": "echo", "nonsense_key": 1}})
-        assert (WARNING, "tasks.t.nonsense_key") in self._keys(findings)
+        assert findings == []
 
     def test_unimportable_operator_is_an_error(self):
         findings = self._check({"t": {"operator": "airflow.operators.bash.NoSuchOperator"}})
         assert any("Cannot import" in m for _, _, m in findings)
 
-    def test_unknown_keys_are_not_guessed_when_the_operator_is_unimportable(self):
-        """With no signature to consult, only the import error is reported."""
+    def test_only_the_import_error_is_reported_for_a_broken_operator(self):
         findings = self._check({"t": {"operator": "no.such.module.Operator", "whatever": 1}})
         assert [p for _, p, _ in findings] == ["tasks.t"]
 

@@ -79,15 +79,13 @@ Tasks are checked too, with task-level semantics:
 
 - task parameters of the wrong type, or gone in the configured Airflow
 - operators and decorators that cannot be imported
-- keys the operator does not accept, once it has been imported successfully
 - dependencies naming a task or task group that does not exist
 - cycles in the dependency graph
 
-A task's keys are mostly operator arguments rather than dag-factory
-parameters, so an unrecognised key is only reported when the operator imported
-and does not accept it. If the operator cannot be imported, that is the only
-thing reported for that task — there is no signature to check the rest
-against.
+Keys a task passes to its operator are not checked. Most Airflow operators
+take `*args` and `**kwargs`, so a signature cannot tell a typo from a
+legitimate argument; Airflow decides when it builds the task, raising
+`Invalid arguments were passed` for what it does not want.
 
 `--airflow-version` checks against a version other than the installed one, so
 an Airflow 2 deployment can be checked from an Airflow 3 environment.

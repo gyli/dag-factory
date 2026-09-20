@@ -165,15 +165,16 @@ class TestLintChecksTasks:
         result = lint_file(_write(tmp_path, "dag.yml", text), AF3, str(tmp_path))
         assert not result.findings, [f.render() for f in result.findings]
 
-    def test_dev_dags_produce_no_operator_false_positives(self):
-        """The repo's own examples must not trip the signature check."""
+    def test_dev_dags_report_nothing_about_unrecognised_task_keys(self):
+        """Task keys are the operator's business, not ours."""
         from pathlib import Path
 
         root = Path("dev/dags")
         files = [p for p in sorted(root.rglob("*.yml")) if p.name != "defaults.yml"]
-        spurious = []
-        for f in files:
-            for finding in lint_file(f, AF3, "dev/dags").findings:
-                if "is not an argument of this operator" in finding.message:
-                    spurious.append(finding.render())
+        spurious = [
+            finding.render()
+            for f in files
+            for finding in lint_file(f, AF3, "dev/dags").findings
+            if "is not an argument" in finding.message
+        ]
         assert not spurious, spurious
