@@ -103,8 +103,19 @@ that defines no DAGs is left alone too.
 `dagfactory/parameters.py` holds a single dict, `PARAM_METADATA`, describing
 every configuration key dag-factory accepts. `lint` reports what it says, and
 `DagBuilder.build()` calls the same `parameters.check()` on every resolved
-config before constructing the DAG — so a config that lints clean builds
-without complaint, and a fact is stated once.
+config before constructing the DAG — so a fact is stated once.
+
+The two do not run exactly the same checks. `check()` covers the DAG body and
+`default_args`, which is everything Airflow accepts silently: a parameter this
+Airflow dropped, a key at the wrong level, a misspelling, a bad type on a DAG
+argument. Those build a subtly wrong DAG without complaint, so the builder
+checks them too.
+
+Task-level problems are `lint`'s alone, through `check_tasks()`. Building a DAG
+already raises a clear error for each of them — `ImportError` for an operator
+that cannot be imported, `TypeError` for a bad or unrecognised argument,
+`KeyError` for a missing dependency, `ValueError` for a cycle — so the builder
+does not repeat the work, which would only report every problem twice.
 
 Version ranges are the half-open interval `[min_version, max_version)` in PEP
 440, where the upper bound is exclusive: `"3.0.0"` means gone in 3.0.

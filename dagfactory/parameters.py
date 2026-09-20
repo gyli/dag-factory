@@ -350,11 +350,18 @@ def scope_of(key: str) -> Tuple[str, ...]:
 
 
 def check(config: Dict[str, Any], airflow_version: Version, scope: str = "dag") -> List[Tuple[str, str, str]]:
-    """Check one resolved config against the metadata.
+    """Check a resolved config's own parameters against the metadata.
 
-    Returns ``(severity, path, message)`` findings. This is the single place
-    the metadata is applied: ``dagfactory lint`` renders these as diagnostics
-    and ``DagBuilder.build`` logs them, so what lints clean builds clean.
+    Covers the DAG body and ``default_args``, and deliberately stops there:
+    everything here is something Airflow accepts silently. A parameter this
+    Airflow dropped, a key at the wrong level, a misspelling, a bad type on a
+    DAG argument — all of them build a subtly wrong DAG without complaint, so
+    both ``dagfactory lint`` and ``DagBuilder.build`` run these.
+
+    Task-level problems are not checked here. Airflow raises a clear error for
+    every one of them while building, so repeating the work would only slow
+    DAG parsing down and report each problem twice. ``dagfactory lint`` calls
+    :func:`check_tasks` for those, because lint never builds anything.
 
     The config must already be resolved — defaults merged, values cast.
     """
@@ -422,9 +429,6 @@ def check(config: Dict[str, Any], airflow_version: Version, scope: str = "dag") 
         for severity, path, message in check(config["default_args"], airflow_version, scope="default_args"):
             findings.append((severity, f"default_args.{path}", message))
 
-    if scope == "dag":
-        findings.extend(check_tasks(config, airflow_version))
-
     return findings
 
 
@@ -459,6 +463,13 @@ DAGFACTORY_TASK_KEYS = frozenset(
 
 def check_tasks(config: Dict[str, Any], airflow_version: Version) -> List[Tuple[str, str, str]]:
     """Check each task's own parameters, and how the tasks fit together.
+
+    Called by ``dagfactory lint`` only. Building a DAG surfaces all of this
+    anyway — an unimportable operator raises ImportError, a bad argument
+    raises TypeError, an unknown one is rejected by the operator, a missing
+    dependency raises KeyError and a cycle raises ValueError — so running
+    these while building would duplicate the work and the message. Lint never
+    builds, so it has to do the work itself.
 
     Task configs carry operator keyword arguments this table does not model, so
     an unrecognised key is only reported when the operator could be imported

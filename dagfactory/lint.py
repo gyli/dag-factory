@@ -140,7 +140,11 @@ def lint_file(
                 )
             )
             continue
-        for severity, path, message in parameters.check(config, airflow_version):
+        findings = parameters.check(config, airflow_version)
+        # Task-level checks are lint's alone: building a DAG raises for all of
+        # them, so DagBuilder.build does not repeat them.
+        findings += parameters.check_tasks(config, airflow_version)
+        for severity, path, message in findings:
             result.findings.append(Finding(yaml_file, builder.dag_name, severity, message, path))
 
     return result

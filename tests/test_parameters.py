@@ -6,7 +6,15 @@ import pytest
 from packaging.version import Version
 
 from dagfactory import parameters
-from dagfactory.parameters import ERROR, PARAM_METADATA, WARNING, check, dag_argument_names, keys_in_scope
+from dagfactory.parameters import (
+    ERROR,
+    PARAM_METADATA,
+    WARNING,
+    check,
+    check_tasks,
+    dag_argument_names,
+    keys_in_scope,
+)
 
 
 class TestMetadataIntegrity:
@@ -205,8 +213,9 @@ class TestTaskChecks:
     AF3 = Version("3.0.0")
 
     def _check(self, tasks, **extra):
+        """What lint runs: the config's own parameters, then the tasks."""
         config = {"dag_id": "d", "start_date": "2024-01-01", "tasks": tasks, **extra}
-        return check(config, self.AF3)
+        return check(config, self.AF3) + check_tasks(config, self.AF3)
 
     def _keys(self, findings):
         return {(s, p) for s, p, _ in findings}
@@ -223,10 +232,10 @@ class TestTaskChecks:
         task = {"t": {"operator": BASH, "bash_command": "echo", "sla": 300}}
         base = {"dag_id": "d", "start_date": "2024-01-01", "tasks": task}
 
-        at_30 = check(base, Version("3.0.0"))
+        at_30 = check_tasks(base, Version("3.0.0"))
         assert (WARNING, "tasks.t.sla") in {(s, p) for s, p, _ in at_30}
 
-        at_31 = check(base, Version("3.1.0"))
+        at_31 = check_tasks(base, Version("3.1.0"))
         assert (ERROR, "tasks.t.sla") in {(s, p) for s, p, _ in at_31}
 
     def test_operator_keyword_arguments_are_not_flagged(self):
@@ -275,7 +284,7 @@ class TestDependencyChecks:
         config = {"dag_id": "d", "start_date": "2024-01-01", "tasks": tasks}
         if task_groups is not None:
             config["task_groups"] = task_groups
-        return check(config, self.AF3)
+        return check(config, self.AF3) + check_tasks(config, self.AF3)
 
     def test_dependency_on_a_missing_task_is_an_error(self):
         findings = self._check({"t": {"operator": BASH, "bash_command": "e", "dependencies": ["nope"]}})
@@ -335,3 +344,44 @@ class TestPattern:
             Version("3.0.0"),
         )
         assert findings == []
+
+
+class TestBuildSkipsTaskChecks:
+    """check() is what DagBuilder.build runs; it must stay off the task path.
+
+    Airflow raises a clear error for every task-level problem while building,
+    so repeating the checks would slow DAG parsing and report twice.
+    """
+
+    AF3 = Version("3.0.0")
+
+    def _config(self, task):
+        return {"dag_id": "d", "start_date": "2024-01-01", "tasks": {"t": task}}
+
+    def test_check_ignores_a_broken_operator(self):
+        config = self._config({"operator": "no.such.module.Operator"})
+        assert check(config, self.AF3) == []
+        assert check_tasks(config, self.AF3) != []
+
+    def test_check_ignores_bad_task_arguments(self):
+        config = self._config({"operator": BASH, "bash_command": "e", "retries": "many"})
+        assert check(config, self.AF3) == []
+        assert check_tasks(config, self.AF3) != []
+
+    def test_check_ignores_dependency_problems(self):
+        config = self._config({"operator": BASH, "bash_command": "e", "dependencies": ["ghost"]})
+        assert check(config, self.AF3) == []
+        assert check_tasks(config, self.AF3) != []
+
+    def test_check_still_reports_dag_level_problems(self):
+        """These Airflow accepts silently, so the builder must keep checking."""
+        config = self._config({"operator": BASH, "bash_command": "e"})
+        config["catchup"] = "notabool"
+        config["nonsense_key"] = 1
+        paths = {p for _, p, _ in check(config, self.AF3)}
+        assert {"catchup", "nonsense_key"} <= paths
+
+    def test_check_still_reports_default_args_problems(self):
+        config = self._config({"operator": BASH, "bash_command": "e"})
+        config["default_args"] = {"catchup": False}
+        assert any(p == "default_args.catchup" for _, p, _ in check(config, self.AF3))
