@@ -202,21 +202,19 @@ class DagBuilder:
 
         # Parse callbacks at the DAG-level and at the Task-level, configured in default_args. Note that the version
         # check has gone into the set_callback method
-        callback_types = [
+        for callback_type in [
             "on_execute_callback",
             "on_success_callback",
             "on_failure_callback",
             "on_retry_callback",  # Not applicable at the DAG-level
             "on_skipped_callback",  # Not applicable at the DAG-level
-        ]
-        if version.parse(AIRFLOW_VERSION) < version.parse("3.1.0"):
-            # Gone as of Airflow 3.1, and only applicable at the DAG level.
-            # PARAM_METADATA records the version bound, so validate_config
-            # reports it and _build_dag_kwargs drops it; there is nothing to
-            # resolve on a newer Airflow.
-            callback_types.append("sla_miss_callback")
+            "sla_miss_callback",  # Not applicable at the default_args level
+        ]:
+            # Removed in Airflow 3.1. PARAM_METADATA records the bound, so
+            # validate_config reports it and _build_dag_kwargs drops it.
+            if callback_type == "sla_miss_callback" and version.parse(AIRFLOW_VERSION) >= version.parse("3.1.0"):
+                continue
 
-        for callback_type in callback_types:
             # Here, we are parsing both the DAG-level params and default_args for callbacks. Previously, this was
             # copy-and-pasted for each callback type and each configuration option (via a string import, function
             # defined via YAML, or file path and name
