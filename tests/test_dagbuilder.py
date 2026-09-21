@@ -1907,3 +1907,43 @@ class TestResolvedParams:
         import inspect
 
         assert "resolved_params()" in inspect.getsource(dagbuilder.DagBuilder.build)
+
+
+class TestValidateOnBuildOnlyAffectsReporting:
+    """Turning validation off must not change which kwargs reach DAG()."""
+
+    CONFIG = {
+        "dag_id": "d",
+        "start_date": "2024-01-01",
+        "timetable": {"x": 1},  # removed in Airflow 3
+        "fail_fast": True,  # a real Airflow argument dag-factory does not forward
+        "catchup": False,
+    }
+
+    def _kwargs(self, validate):
+        with patch.object(dagbuilder.settings, "validate_on_build", validate):
+            return dagbuilder.DagBuilder._build_dag_kwargs(dict(self.CONFIG))
+
+    def test_unsupported_params_are_dropped_either_way(self):
+        with patch.object(dagbuilder, "INSTALLED_AIRFLOW_VERSION", version.parse("3.0.0")):
+            on, off = self._kwargs(True), self._kwargs(False)
+        assert on == off
+        for dropped in ("timetable", "fail_fast"):
+            assert dropped not in off
+
+    def test_supported_params_are_kept_either_way(self):
+        with patch.object(dagbuilder, "INSTALLED_AIRFLOW_VERSION", version.parse("3.0.0")):
+            on, off = self._kwargs(True), self._kwargs(False)
+        assert on["catchup"] is False and off["catchup"] is False
+
+    def test_the_setting_only_silences_the_log(self, caplog):
+        config = {"dag_id": "d", "start_date": "2024-01-01", "nonsense_key": 1, "tasks": {"t": {"operator": "x"}}}
+        with caplog.at_level(logging.WARNING, logger="dagfactory"):
+            with patch.object(dagbuilder.settings, "validate_on_build", False):
+                dagbuilder.DagBuilder.validate_config(config)
+        assert not caplog.records
+
+        with caplog.at_level(logging.WARNING, logger="dagfactory"):
+            with patch.object(dagbuilder.settings, "validate_on_build", True):
+                dagbuilder.DagBuilder.validate_config(config)
+        assert any("nonsense_key" in r.message for r in caplog.records)
