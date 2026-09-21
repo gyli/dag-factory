@@ -242,9 +242,9 @@ def _check_metadata() -> None:
         if meta.get("min_version") and meta.get("max_version"):
             if Version(meta["min_version"]) >= Version(meta["max_version"]):
                 raise RuntimeError(f"'{key}' has an empty version range")
-        target = meta.get("deprecated_in_favor_of")
-        if target and target not in PARAM_METADATA:
-            raise RuntimeError(f"'{key}' defers to unknown key '{target}'")
+        deprecated_in_favor_of = meta.get("deprecated_in_favor_of")
+        if deprecated_in_favor_of and deprecated_in_favor_of not in PARAM_METADATA:
+            raise RuntimeError(f"'{key}' defers to unknown key '{deprecated_in_favor_of}'")
         if meta.get("transform") and not callable(meta["transform"]):
             raise RuntimeError(f"'{key}' has a non-callable transform")
         if meta.get("pattern"):
@@ -290,18 +290,18 @@ def unsupported_reason(key: str, airflow_version: Version) -> Optional[Tuple[str
     """
     meta = PARAM_METADATA.get(key, {})
 
-    minimum = meta.get("min_version")
-    if minimum and airflow_version < Version(minimum):
+    min_version = meta.get("min_version")
+    if min_version and airflow_version < Version(min_version):
         return (
             ERROR,
-            f"`{key}` was introduced in Airflow {minimum}; the configured Airflow is {airflow_version}.",
+            f"`{key}` was introduced in Airflow {min_version}; the configured Airflow is {airflow_version}.",
         )
 
-    maximum = meta.get("max_version")
-    if maximum and airflow_version >= Version(maximum):
+    max_version = meta.get("max_version")
+    if max_version and airflow_version >= Version(max_version):
         return (
             ERROR,
-            f"`{key}` was removed in Airflow {maximum}; the configured Airflow is {airflow_version}.",
+            f"`{key}` was removed in Airflow {max_version}; the configured Airflow is {airflow_version}.",
         )
 
     if meta.get("supported", True) is False:
@@ -391,17 +391,17 @@ def check(
             findings.append((severity, key, message))
             continue
 
-        since = meta.get("deprecated_since")
-        if since and airflow_version >= Version(since):
-            target = meta.get("deprecated_in_favor_of")
-            hint = f" Use `{target}` instead." if target else ""
-            findings.append((WARNING, key, f"`{key}` is deprecated as of Airflow {since}.{hint}"))
+        deprecated_since = meta.get("deprecated_since")
+        if deprecated_since and airflow_version >= Version(deprecated_since):
+            deprecated_in_favor_of = meta.get("deprecated_in_favor_of")
+            hint = f" Use `{deprecated_in_favor_of}` instead." if deprecated_in_favor_of else ""
+            findings.append((WARNING, key, f"`{key}` is deprecated as of Airflow {deprecated_since}.{hint}"))
 
         if value is None or not check_values:
             continue
-        expected = meta.get("types")
-        if expected and not _type_ok(value, expected):
-            names = ", ".join(t.__name__ for t in expected)
+        expected_types = meta.get("types")
+        if expected_types and not _type_ok(value, expected_types):
+            names = ", ".join(t.__name__ for t in expected_types)
             findings.append((ERROR, key, f"`{key}` should be {names}, got {type(value).__name__}."))
             continue
         if meta.get("enum") and value not in meta["enum"]:
@@ -533,19 +533,19 @@ def _check_operator(task: Dict[str, Any], prefix: str, findings: List[Tuple[str,
     Declaring one is structural and always checked. Importing it needs the
     provider installed, which the caller may not want to require.
     """
-    target = task.get("operator") or task.get("decorator")
-    if not target:
+    import_path = task.get("operator") or task.get("decorator")
+    if not import_path:
         findings.append((ERROR, prefix, "A task must define either `operator` or `decorator`."))
         return
-    if not do_import or not isinstance(target, str):
+    if not do_import or not isinstance(import_path, str):
         return
 
     from dagfactory.utils import import_string
 
     try:
-        import_string(target)
+        import_string(import_path)
     except Exception as exc:
-        findings.append((ERROR, prefix, f"Cannot import `{target}`: {type(exc).__name__}: {exc}"))
+        findings.append((ERROR, prefix, f"Cannot import `{import_path}`: {type(exc).__name__}: {exc}"))
 
 
 def _check_for_cycles(tasks: Dict[str, Any]) -> List[Tuple[str, str, str]]:

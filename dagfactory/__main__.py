@@ -34,19 +34,27 @@ app = typer.Typer(
 )
 
 
-def _check_yaml_syntax(file_path: Path):
-    """
-    Check if the YAML file can be loaded.
+def _load_error(file_path: Path) -> Optional[Exception]:
+    """Return whatever stopped the YAML file loading, or None if it loaded.
+
+    Loading also materialises `__type__` directives, so this catches more than
+    a syntax error: anything the import raises lands here too. Returning the
+    exception rather than a string leaves the caller to decide how to show it.
     """
     try:
         load_yaml_file(file_path)
-    except yaml.YAMLError as e:
-        return str(e)
-    except Exception as e:
-        # Loading also materialises `__type__` directives, so anything the
-        # import raises lands here. Report it rather than letting it escape
-        # and take the whole run down.
-        return f"{type(e).__name__}: {e}"
+    except Exception as exc:
+        return exc
+    return None
+
+
+def _describe(exc: Exception, verbose: bool) -> str:
+    """Render a load failure for the results table."""
+    text = str(exc).strip() if isinstance(exc, yaml.YAMLError) else f"{type(exc).__name__}: {exc}"
+    if verbose:
+        return text
+    first_line = text.split("\n")[0]
+    return first_line[:120] + "..."
 
 
 def _find_yaml_files(path: Path) -> list[Path]:
@@ -202,11 +210,14 @@ def lint(
     total_errors = 0
     total_warnings = 0
     for file_path in files:
-        syntax_error = _check_yaml_syntax(file_path)
-        if syntax_error:
+        load_error = _load_error(file_path)
+        if load_error is not None:
             total_errors += 1
-            message = syntax_error.strip() if verbose else syntax_error.strip().split("\n")[0][:120] + "..."
-            table.add_row(str(file_path), Text("Syntax Error", style="red"), Text(message, style="red"))
+            table.add_row(
+                str(file_path),
+                Text("Syntax Error", style="red"),
+                Text(_describe(load_error, verbose), style="red"),
+            )
             continue
 
         result = lint_file(
