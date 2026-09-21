@@ -1878,3 +1878,32 @@ class TestResolveUserDefinedMacros:
     def test_invalid_import_string_raises(self):
         with pytest.raises(Exception):
             resolve_user_defined_macros({"bad": "nonexistent.module.func"})
+
+
+class TestResolvedParams:
+    """build() and lint must read the config through the same normalisation."""
+
+    def test_list_form_tasks_become_a_mapping(self):
+        config = {
+            "start_date": "2024-01-01",
+            "tasks": [{"task_id": "t1", "operator": "x", "bash_command": "echo"}],
+        }
+        params = dagbuilder.DagBuilder("d", config, {}).resolved_params()
+        assert isinstance(params["tasks"], dict)
+        assert "t1" in params["tasks"]
+
+    def test_list_form_task_groups_become_a_mapping(self):
+        config = {
+            "start_date": "2024-01-01",
+            "tasks": {"t1": {"operator": "x"}},
+            "task_groups": [{"group_name": "tg1", "tooltip": "t"}],
+        }
+        params = dagbuilder.DagBuilder("d", config, {}).resolved_params()
+        assert isinstance(params["task_groups"], dict)
+        assert "tg1" in params["task_groups"]
+
+    def test_build_reads_the_config_through_resolved_params(self):
+        """If build stopped using it, lint would drift back out of step."""
+        import inspect
+
+        assert "resolved_params()" in inspect.getsource(dagbuilder.DagBuilder.build)

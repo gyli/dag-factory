@@ -210,3 +210,135 @@ my_dag:
         text = self.MISSING + "  catchup: notabool\n"
         result = lint_file(_write(tmp_path, "dag.yml", text), AF3, str(tmp_path), check_operators=False)
         assert any("catchup" in f.message for f in result.errors)
+
+
+class TestListFormIsChecked:
+    """tasks and task_groups may be lists, and the docs use that form.
+
+    lint resolves configs through DagBuilder.resolved_params, the same
+    normalisation build() applies, so both forms reach the checks identically.
+    """
+
+    def test_list_form_tasks_are_checked(self, tmp_path):
+        text = f"""
+my_dag:
+  start_date: 2024-01-01
+  tasks:
+    - task_id: t1
+      operator: {BASH}
+      bash_command: echo
+      retries: "many"
+"""
+        result = lint_file(_write(tmp_path, "dag.yml", text), AF3, str(tmp_path))
+        assert any("retries" in f.message for f in result.errors), [f.render() for f in result.findings]
+
+    def test_list_form_task_without_an_operator_is_caught(self, tmp_path):
+        text = """
+my_dag:
+  start_date: 2024-01-01
+  tasks:
+    - task_id: t1
+      bash_command: echo
+"""
+        result = lint_file(_write(tmp_path, "dag.yml", text), AF3, str(tmp_path))
+        assert any("operator" in f.message and "decorator" in f.message for f in result.errors)
+
+    def test_list_form_dependencies_are_checked(self, tmp_path):
+        text = f"""
+my_dag:
+  start_date: 2024-01-01
+  tasks:
+    - task_id: t1
+      operator: {BASH}
+      bash_command: echo
+      dependencies: [ghost]
+"""
+        result = lint_file(_write(tmp_path, "dag.yml", text), AF3, str(tmp_path))
+        assert any("does not exist" in f.message for f in result.errors)
+
+    def test_list_form_cycles_are_caught(self, tmp_path):
+        text = f"""
+my_dag:
+  start_date: 2024-01-01
+  tasks:
+    - task_id: a
+      operator: {BASH}
+      bash_command: echo
+      dependencies: [b]
+    - task_id: b
+      operator: {BASH}
+      bash_command: echo
+      dependencies: [a]
+"""
+        result = lint_file(_write(tmp_path, "dag.yml", text), AF3, str(tmp_path))
+        assert any("Cycle detected" in f.message for f in result.errors)
+
+    def test_list_form_task_groups_do_not_crash(self, tmp_path):
+        """A list of group mappings used to blow up building the name set."""
+        text = f"""
+my_dag:
+  start_date: 2024-01-01
+  task_groups:
+    - group_name: tg1
+      tooltip: a group
+  tasks:
+    t1:
+      operator: {BASH}
+      bash_command: echo
+"""
+        result = lint_file(_write(tmp_path, "dag.yml", text), AF3, str(tmp_path))
+        assert not result.findings, [f.render() for f in result.findings]
+
+    def test_a_dependency_on_a_list_form_task_group_resolves(self, tmp_path):
+        text = f"""
+my_dag:
+  start_date: 2024-01-01
+  task_groups:
+    - group_name: tg1
+      tooltip: a group
+  tasks:
+    - task_id: t1
+      operator: {BASH}
+      bash_command: echo
+      dependencies: [tg1]
+"""
+        result = lint_file(_write(tmp_path, "dag.yml", text), AF3, str(tmp_path))
+        assert not result.errors, [f.render() for f in result.errors]
+
+    def test_both_forms_of_the_same_dag_agree(self, tmp_path):
+        """The form the author chose must not change what lint reports."""
+        as_list = f"""
+my_dag:
+  start_date: 2024-01-01
+  tasks:
+    - task_id: t1
+      operator: {BASH}
+      bash_command: echo
+      retries: "many"
+"""
+        as_dict = f"""
+my_dag:
+  start_date: 2024-01-01
+  tasks:
+    t1:
+      operator: {BASH}
+      bash_command: echo
+      retries: "many"
+"""
+        a = lint_file(_write(tmp_path, "a.yml", as_list), AF3, str(tmp_path))
+        b = lint_file(_write(tmp_path, "b.yml", as_dict), AF3, str(tmp_path))
+        assert [f.render() for f in a.findings] == [f.render() for f in b.findings]
+
+    def test_params_is_accepted_on_a_task(self, tmp_path):
+        """BaseOperator takes params, so it is valid at task level too."""
+        text = f"""
+my_dag:
+  start_date: 2024-01-01
+  tasks:
+    - task_id: t1
+      operator: {BASH}
+      bash_command: echo
+      params: {{x: 1}}
+"""
+        result = lint_file(_write(tmp_path, "dag.yml", text), AF3, str(tmp_path))
+        assert not result.findings, [f.render() for f in result.findings]

@@ -77,9 +77,11 @@ class TestForwarding:
             assert key in forwarded
 
     def test_scopes_partition_as_expected(self):
+        # params is the one key valid everywhere: DAG() and BaseOperator both take it.
         assert len(keys_in_scope("dag")) == 43
-        assert len(keys_in_scope("task")) == 19
-        assert len(keys_in_scope("default_args")) == 25
+        assert len(keys_in_scope("task")) == 20
+        assert len(keys_in_scope("default_args")) == 26
+        assert keys_in_scope("dag") & keys_in_scope("task") == {"params"}
 
 
 class TestVersionRules:

@@ -134,7 +134,7 @@ def lint_file(
 
     for builder in builders:
         try:
-            config = builder.get_dag_params()
+            config = builder.resolved_params()
         except Exception as exc:
             result.findings.append(
                 Finding(

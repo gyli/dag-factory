@@ -90,6 +90,7 @@ TIMEDELTA_LIKE = (str, int, float, dict)
 DAG = ("dag",)
 TASK = ("task", "default_args")
 DAG_AND_DEFAULTS = ("dag", "default_args")
+ANY_LEVEL = ("dag", "task", "default_args")
 
 PARAM_METADATA: Dict[str, Dict[str, Any]] = {
     # ---- DAG-level, forwarded to DAG() -------------------------------------
@@ -127,7 +128,8 @@ PARAM_METADATA: Dict[str, Dict[str, Any]] = {
     "doc_md": {"types": (str,), "scope": DAG},
     "access_control": {"types": (dict,), "scope": DAG},
     "is_paused_upon_creation": {"types": (bool,), "scope": DAG},
-    "params": {"types": (dict,), "scope": DAG},
+    # Both DAG() and BaseOperator take params, so it is valid anywhere.
+    "params": {"types": (dict,), "scope": ANY_LEVEL},
     "user_defined_macros": {
         "types": (dict,),
         "transform": resolve_user_defined_macros,

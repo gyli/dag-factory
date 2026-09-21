@@ -809,6 +809,19 @@ class DagBuilder:
 
         raise DagFactoryConfigException("'task_groups' must be either a mapping or a list of group configs")
 
+    def resolved_params(self) -> Dict[str, Any]:
+        """The config as ``build`` sees it: merged, then normalised.
+
+        ``tasks`` and ``task_groups`` may each be written as a mapping or as a
+        list, so they are put in canonical form before anything reads them.
+        ``dagfactory lint`` calls this too, so it checks the same shape the
+        builder does rather than whichever one the author happened to write.
+        """
+        dag_params = self.get_dag_params()
+        dag_params["tasks"] = DagBuilder._normalise_tasks_config(dag_params.get("tasks"))
+        dag_params["task_groups"] = DagBuilder._normalise_task_groups_config(dag_params.get("task_groups"))
+        return dag_params
+
     @staticmethod
     def validate_config(dag_params: Dict[str, Any]) -> None:
         """Check a resolved DAG config against the parameter metadata.
@@ -882,11 +895,7 @@ class DagBuilder:
         :returns: dict with dag_id and DAG object
         :type: Dict[str, Union[str, DAG]]
         """
-        dag_params: Dict[str, Any] = self.get_dag_params()
-
-        dag_params["tasks"] = DagBuilder._normalise_tasks_config(dag_params.get("tasks"))
-
-        dag_params["task_groups"] = DagBuilder._normalise_task_groups_config(dag_params.get("task_groups"))
+        dag_params: Dict[str, Any] = self.resolved_params()
 
         DagBuilder.validate_config(dag_params)
 
