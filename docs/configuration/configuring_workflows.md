@@ -39,6 +39,25 @@ The **dictionary format** is also supported for backward compatibility. In this 
 !!! note "Format Recommendation"
     While both formats are supported, **we recommend using the list format** as it is more readable and easier to maintain.
 
+## Durations
+
+`dagrun_timeout`, `retry_delay`, `sla` and `execution_timeout` are `datetime.timedelta` values in Airflow. A plain number is read as seconds:
+
+```yaml
+example_dag:
+  dagrun_timeout: 3600
+  default_args:
+    retry_delay: 300
+```
+
+Use a `__type__` block when you want a unit other than seconds:
+
+```yaml
+  dagrun_timeout:
+    __type__: datetime.timedelta
+    hours: 1
+```
+
 ## Reserved Keys
 
 The DAG Factory designates certain YAML keys for internal processing. While these keys appear in your YAML files, they are reserved exclusively for specific internal functions and should not be redefined or used for other purposes:

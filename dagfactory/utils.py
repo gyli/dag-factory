@@ -83,6 +83,31 @@ def get_time_delta(time_string: str) -> timedelta:
     return timedelta(**time_params)
 
 
+# Parameters Airflow expects as a datetime.timedelta. A bare number is read as
+# seconds, so a __type__ block is only needed for anything other than seconds.
+TIMEDELTA_PARAMS: Tuple[str, ...] = (
+    "dagrun_timeout",
+    "execution_timeout",
+    "retry_delay",
+    "sla",
+)
+
+
+def convert_numeric_timedelta_params(params: Dict[str, Any]) -> None:
+    """
+    Convert bare numeric values for timedelta parameters into timedeltas, in place.
+
+    :param params: a config dict that may hold any of TIMEDELTA_PARAMS
+    :type params: Dict[str, Any]
+    """
+    for key in TIMEDELTA_PARAMS:
+        value = params.get(key)
+        # bool is a subclass of int, and is never a sensible duration.
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        params[key] = timedelta(seconds=value)
+
+
 def merge_configs(config: Dict[str, Any], default_config: Dict[str, Any]) -> Dict[str, Any]:
     """
     Merges a `default` config with DAG config. Used to set default values

@@ -93,6 +93,30 @@ def test_get_time_delta_bad_date():
         utils.get_time_delta("bad_date")
 
 
+@pytest.mark.parametrize(
+    "params,expected",
+    [
+        ({"dagrun_timeout": 3600}, {"dagrun_timeout": datetime.timedelta(seconds=3600)}),
+        ({"retry_delay": 300}, {"retry_delay": datetime.timedelta(seconds=300)}),
+        ({"sla": 60}, {"sla": datetime.timedelta(seconds=60)}),
+        ({"execution_timeout": 90.5}, {"execution_timeout": datetime.timedelta(seconds=90.5)}),
+        # Already a timedelta, left alone.
+        (
+            {"retry_delay": datetime.timedelta(minutes=5)},
+            {"retry_delay": datetime.timedelta(minutes=5)},
+        ),
+        # Not a duration parameter, left alone.
+        ({"retries": 3}, {"retries": 3}),
+        # bool is an int subclass but is never a duration.
+        ({"sla": True}, {"sla": True}),
+        ({}, {}),
+    ],
+)
+def test_convert_numeric_timedelta_params(params, expected):
+    utils.convert_numeric_timedelta_params(params)
+    assert params == expected
+
+
 def test_merge_configs_same_configs():
     dag_config = {"thing": "value1"}
     default_config = {"thing": "value2"}

@@ -203,6 +203,11 @@ class DagBuilder:
                 timezone=dag_params["default_args"].get("timezone", "UTC"),
             )
 
+        # A bare number for a timedelta parameter means seconds, at DAG level and
+        # inside default_args.
+        utils.convert_numeric_timedelta_params(dag_params)
+        utils.convert_numeric_timedelta_params(dag_params["default_args"])
+
         # Parse callbacks at the DAG-level and at the Task-level, configured in default_args. Note that the version
         # check has gone into the set_callback method
         for callback_type in [
@@ -1044,6 +1049,8 @@ class DagBuilder:
     @staticmethod
     def adjust_general_task_params(task_params: dict[str, Any]):
         """Adjusts in place the task params argument"""
+        utils.convert_numeric_timedelta_params(task_params)
+
         # Used by airflow.sensors.external_task_sensor.ExternalTaskSensor
         if utils.check_dict_key(task_params, "execution_date_fn"):
             python_callable: Callable = import_string(task_params["execution_date_fn"])
