@@ -1,6 +1,12 @@
 # DAG Factory documentation
 
-Everything you need to know about how to build Apache Airflow® workflows using YAML files.
+DAG Factory builds Apache Airflow® DAGs from configuration files, so a pipeline can be defined and changed without writing Python.
+
+Airflow DAGs are Python, which means anyone who wants to add or edit one needs to work in Python and understand how Airflow expects a DAG to be put together. That is a real barrier for analysts and data engineers who know the pipeline well but do not work in Python day to day, and it tends to leave teams copying boilerplate between DAG files.
+
+With DAG Factory the whole DAG, its schedule, its tasks and their dependencies, lives in one declarative file. Shared settings can be kept in a defaults file rather than repeated, and the configuration is easy to review, diff and generate.
+
+Configuration is written in YAML today.
 
 ## Getting started
 
@@ -10,7 +16,7 @@ Are you new to DAG Factory? This is the place to start!
     - [Quickstart with Airflow standalone](getting-started/quick-start-airflow-standalone.md)
     - [Quickstart with Astro CLI](getting-started/quick-start-astro-cli.md)
 
-- [Using YAML instead of Python](comparison/index.md)
+- [Using configuration instead of Python](comparison/index.md)
     - [Traditional Airflow Operators](comparison/traditional_operators.md)
     - [TaskFlow API](comparison/taskflow_api.md)
 
