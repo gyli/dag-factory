@@ -6,6 +6,7 @@ import pendulum
 import pytest
 
 from dagfactory import utils
+from dagfactory.exceptions import DagFactoryException
 from dagfactory.utils import cast_with_type
 
 CET = pendulum.timezone("Europe/Amsterdam")
@@ -83,9 +84,50 @@ def test_get_time_delta_days():
 
 
 def test_get_time_delta_combo():
-    expected = datetime.timedelta(0, 3600)
+    expected = datetime.timedelta(0, 5400)
     actual = utils.get_time_delta("1 hour 30 minutes")
     assert actual == expected
+
+
+@pytest.mark.parametrize(
+    "time_string,expected",
+    [
+        # Every unit after the first used to be dropped silently.
+        ("2 hours 30 minutes", datetime.timedelta(hours=2, minutes=30)),
+        ("5 days 3 hours", datetime.timedelta(days=5, hours=3)),
+        ("1 day 2 hours", datetime.timedelta(days=1, hours=2)),
+        ("1 day 2 hours 3 minutes 4 seconds", datetime.timedelta(days=1, hours=2, minutes=3, seconds=4)),
+        # Units are no longer required to appear in a fixed order.
+        ("30 minutes 2 hours", datetime.timedelta(hours=2, minutes=30)),
+        ("3 hours 5 days", datetime.timedelta(days=5, hours=3)),
+        # Singular and plural spellings are both accepted.
+        ("1 hour", datetime.timedelta(hours=1)),
+        ("1 hours", datetime.timedelta(hours=1)),
+        ("2 day", datetime.timedelta(days=2)),
+        # The same unit twice accumulates rather than overwriting.
+        ("1 hour 2 hours", datetime.timedelta(hours=3)),
+    ],
+)
+def test_get_time_delta_multiple_units(time_string, expected):
+    assert utils.get_time_delta(time_string) == expected
+
+
+@pytest.mark.parametrize(
+    "time_string",
+    [
+        "",
+        "bad_date",
+        "1 week",  # unsupported unit
+        "5",  # magnitude with no unit
+        "days",  # unit with no magnitude
+        "5 days extra",  # trailing junk used to be ignored
+        "hello 2 hours",  # leading junk
+        "2 hours nonsense 3 minutes",  # junk between two valid units
+    ],
+)
+def test_get_time_delta_invalid_raises(time_string):
+    with pytest.raises(DagFactoryException, match="Invalid relative time"):
+        utils.get_time_delta(time_string)
 
 
 def test_get_time_delta_bad_date():
