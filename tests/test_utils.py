@@ -1,5 +1,6 @@
 import datetime
 import os
+import sys
 from unittest.mock import patch
 
 import pendulum
@@ -131,6 +132,34 @@ def test_get_python_callable_valid():
     python_callable = utils.get_python_callable(python_callable_name, python_callable_file)
 
     assert callable(python_callable)
+
+
+def test_get_python_callable_does_not_shadow_existing_modules(tmp_path):
+    # A callable file named after a real module used to be registered under
+    # that bare name, replacing it for the whole interpreter.
+    shadowing_file = tmp_path / "json.py"
+    shadowing_file.write_text("def my_callable():\n    return 'user function'\n")
+
+    callable_ = utils.get_python_callable("my_callable", str(shadowing_file))
+
+    assert callable_() == "user function"
+    assert hasattr(sys.modules["json"], "dumps")
+
+
+def test_get_python_callable_same_basename_different_files(tmp_path):
+    first = tmp_path / "a" / "helpers.py"
+    second = tmp_path / "b" / "helpers.py"
+    first.parent.mkdir()
+    second.parent.mkdir()
+    first.write_text("def hello():\n    return 'from A'\n")
+    second.write_text("def hello():\n    return 'from B'\n")
+
+    from_first = utils.get_python_callable("hello", str(first))
+    from_second = utils.get_python_callable("hello", str(second))
+
+    assert from_first() == "from A"
+    assert from_second() == "from B"
+    assert "helpers" not in sys.modules
 
 
 def test_get_python_callable_invalid_path():

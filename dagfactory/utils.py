@@ -121,11 +121,20 @@ def get_python_callable(python_callable_name, python_callable_file):
         raise DagFactoryException("`python_callable_file` must be absolute path")
 
     python_file_path = Path(python_callable_file).resolve()
-    module_name = python_file_path.stem
+    # Namespace the module by its full path. Registering it under the bare file
+    # name would replace any module of that name for the whole interpreter, and
+    # the Airflow DAG processor parses many DAGs in one process, so a callable
+    # file named json.py or utils.py would break unrelated DAGs.
+    module_name = "dagfactory_callables." + re.sub(r"\W", "_", str(python_file_path))
     spec = importlib.util.spec_from_file_location(module_name, python_callable_file)
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    # Register before executing so a module that imports itself resolves.
     sys.modules[module_name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        del sys.modules[module_name]
+        raise
     python_callable = getattr(module, python_callable_name)
 
     return python_callable
