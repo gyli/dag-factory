@@ -23,6 +23,25 @@ except ImportError:
 from dagfactory.exceptions import DagFactoryException
 
 
+def set_timezone(date_value: datetime, local_tz: pendulum.timezone) -> datetime:
+    """
+    Put ``date_value`` in ``local_tz``.
+
+    A naive datetime is assumed to already be wall-clock time in ``local_tz``,
+    so the timezone is simply attached. An aware one is converted, preserving
+    the instant it refers to.
+
+    :param date_value: the datetime to place in ``local_tz``
+    :type date_value: datetime.datetime
+    :param local_tz: the timezone the result should be expressed in
+    :returns: timezone-aware datetime in ``local_tz``
+    :type: datetime.datetime
+    """
+    if date_value.tzinfo is not None and date_value.utcoffset() is not None:
+        return date_value.astimezone(local_tz)
+    return date_value.replace(tzinfo=local_tz)
+
+
 def get_datetime(date_value: Union[str, datetime, date], timezone: str = "UTC") -> datetime:
     """
     Takes value from DAG config and generates valid datetime. Defaults to
@@ -38,12 +57,14 @@ def get_datetime(date_value: Union[str, datetime, date], timezone: str = "UTC") 
     """
     local_tz: pendulum.timezone = pendulum.timezone(timezone)
     if isinstance(date_value, datetime):
-        return date_value.replace(tzinfo=local_tz)
+        return set_timezone(date_value, local_tz)
     if isinstance(date_value, date):
         return datetime.combine(date=date_value, time=datetime.min.time()).replace(tzinfo=local_tz)
-    # Try parsing as date string
+    # Try parsing as date string. Parse with tz=None so a string without an
+    # offset stays naive; pendulum otherwise defaults it to UTC, which would
+    # hide whether the user supplied an offset at all.
     try:
-        return pendulum.parse(date_value).replace(tzinfo=local_tz)
+        return set_timezone(pendulum.parse(date_value, tz=None), local_tz)
     except pendulum.parsing.exceptions.ParserError:
         # Try parsing as relative time string
         rel_delta: timedelta = get_time_delta(date_value)

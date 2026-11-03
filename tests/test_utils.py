@@ -48,6 +48,34 @@ def test_get_start_date_relative_time_timezone():
     assert actual == expected
 
 
+def test_get_start_date_str_no_offset_keeps_wall_clock():
+    # A string without an offset is wall-clock time in the target timezone.
+    expected = datetime.datetime(2018, 2, 1, 3, 0, tzinfo=CET)
+    actual = utils.get_datetime("2018-02-01T03:00:00", "Europe/Amsterdam")
+    assert actual == expected
+
+
+@pytest.mark.parametrize(
+    "date_value",
+    [
+        "2026-01-01T00:00:00+08:00",
+        datetime.datetime(2026, 1, 1, 0, 0, tzinfo=pendulum.timezone("Asia/Shanghai")),
+    ],
+)
+def test_get_start_date_aware_input_is_converted_not_relabelled(date_value):
+    # An offset the user supplied has to be honoured: midnight in +08:00 is
+    # 16:00 UTC the day before, not midnight UTC.
+    expected = datetime.datetime(2025, 12, 31, 16, 0, tzinfo=UTC)
+    actual = utils.get_datetime(date_value, "UTC")
+    assert actual == expected
+
+
+def test_get_start_date_utc_designator_is_converted():
+    expected = datetime.datetime(2026, 1, 1, 1, 0, tzinfo=CET)
+    actual = utils.get_datetime("2026-01-01T00:00:00Z", "Europe/Amsterdam")
+    assert actual == expected
+
+
 def test_get_start_date_bad_timezone():
     with pytest.raises(Exception):
         utils.get_datetime(datetime.datetime(2018, 2, 1), "bad_timezone")
